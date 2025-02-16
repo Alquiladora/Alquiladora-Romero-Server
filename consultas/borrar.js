@@ -11,6 +11,7 @@ const moment = require("moment");
 const otplib = require("otplib");
 const qrcode = require("qrcode");
 
+
 const { pool } = require("../connectBd");
 
 const usuarioRouter = express.Router();
@@ -28,8 +29,8 @@ const logger = winston.createLogger({
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_TIME = 10 * 60 * 1000;
 const TOKEN_EXPIRATION_TIME = 30 * 60 * 1000;
-const INACTIVITY_TIMEOUT = 10 * 60 * 1000;
-const TOKEN_RENEW_THRESHOLD = 2 * 60 * 1000;
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; 
+
 
 if (!process.env.SECRET_KEY) {
   throw new Error("La variable de entorno SECRET_KEY no está definida.");
@@ -82,11 +83,10 @@ function getOrCreateClientId(req, res) {
   return clientId;
 }
 
+
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
-  const fechaCreacion = new Date().toLocaleString("sv-SE", {
-    timeZone: "America/Mexico_City",
-  });
+  const fechaCreacion = new Date().toLocaleString("sv-SE", { timeZone: "America/Mexico_City" });
   return fechaCreacion.replace(" ", "T").replace(",", "");
 }
 //=============================REGISTRO=============================
@@ -101,20 +101,19 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
       return res.status(400).json({ message: "La contraseña es obligatoria" });
     }
 
+    
     const capitalizeFirstLetter = (str) => {
-      return str
-        ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-        : "";
+      return str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : "";
     };
     const nombreFormateado = capitalizeFirstLetter(nombre);
     const apellidoPFormateado = capitalizeFirstLetter(apellidoP);
     const apellidoMFormateado = capitalizeFirstLetter(apellidoM);
 
+
     const hashedPassword = await argon2.hash(password);
 
-    const fechaCreacion = new Date().toLocaleString("sv-SE", {
-      timeZone: "America/Mexico_City",
-    });
+ 
+    const fechaCreacion = new Date().toLocaleString("sv-SE", { timeZone: "America/Mexico_City" });
 
     const query = `
       INSERT INTO tblusuarios 
@@ -134,6 +133,8 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
       null,
       fechaCreacion,
     ]);
+
+   
 
     // Manejo de `insertId` dependiendo de la estructura de `result`
     const insertId = result.insertId;
@@ -175,8 +176,11 @@ usuarioRouter.get("/", async (req, res, next) => {
   }
 });
 
+
+
 ///==========================================================================================================================================================================================
 async function verifyRecaptcha(captchaToken) {
+  
   try {
     const response = await axios.post(
       "https://www.google.com/recaptcha/api/siteverify",
@@ -195,14 +199,21 @@ async function verifyRecaptcha(captchaToken) {
   }
 }
 
+
 //====================LOGIN=================================================
 usuarioRouter.post("/login", async (req, res, next) => {
   try {
     // Extraer email, contraseña y token MFA (si se incluye)
-    const { email, contrasena, tokenMFA, deviceType, captchaToken, ip } =
-      req.body;
+    const {
+      email,
+      contrasena,
+      tokenMFA,
+      deviceType,
+      captchaToken,
+      ip,
+    } = req.body;
 
-    const clientTimestamp = obtenerFechaMexico();
+    const clientTimestamp=obtenerFechaMexico()
 
     if (!email || !contrasena) {
       return res
@@ -210,7 +221,9 @@ usuarioRouter.post("/login", async (req, res, next) => {
         .json({ message: "Email y contraseña son obligatorios." });
     }
 
-    //capchapt token obtenido
+  
+
+  //capchapt token obtenido
     const cookiesId = getOrCreateClientId(req, res);
 
     // Verificar si la conexión a la base de datos está disponible
@@ -220,36 +233,40 @@ usuarioRouter.post("/login", async (req, res, next) => {
 
     // Buscar al usuario por correo
     const query = "SELECT * FROM tblusuarios WHERE correo = ?";
-    const [result] = await pool.query(query, [email]);
-    if (!Array.isArray(result) || result.length === 0) {
+    const [result] = await pool.query(query, [email]);     
+    if (!Array.isArray(result) || result.length === 0) { 
       console.log("Credenciales Incorrectas");
       return res.status(401).json({ message: "Credenciales Incorrectas" });
     }
+    
+    const usuario = result[0]; 
+   
 
-    const usuario = result[0];
-
+    
     //===================================================================================================
-
+  
+    
     // Verificar si el usuario está bloqueado
     const bloqueoQuery = "SELECT * FROM tblipbloqueados WHERE idUsuarios = ?";
     const [bloqueos] = await pool.query(bloqueoQuery, [usuario.idUsuarios]);
+
 
     if (bloqueos.length > 0) {
       const bloqueo = bloqueos[0];
       const ahora = new Date();
 
-      console.log("ahora", ahora);
+      console.log("ahora", ahora)
       const lockUntil = bloqueo.lock_until
         ? new Date(bloqueo.lock_until)
         : null;
 
       // **
-      if (bloqueos.length > 0 && bloqueos[0].bloqueado === 1) {
+      if (bloqueo.bloqueado === 1) {
+        console.log("Usuario bloqueado por el administrador.");
         return res.status(403).json({
           message: "Cuenta bloqueada por el administrador.",
         });
       }
-
       if (lockUntil && lockUntil <= ahora) {
         console.log(
           "El tiempo de bloqueo ha expirado. Desbloqueando usuario..."
@@ -259,26 +276,29 @@ usuarioRouter.post("/login", async (req, res, next) => {
       SET intentos = 0, lock_until = NULL 
       WHERE idUsuarios = ?`;
         await pool.query(desbloqueoQuery, [usuario.idUsuarios]);
-        bloqueo.intentos = 0;
+        bloqueo.intentos = 0; 
         bloqueo.lock_until = null;
         console.log("Usuario desbloqueado correctamente.");
       }
 
+     
       if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
+    
         if (!lockUntil) {
           const lockTime = new Date(ahora.getTime() + LOCK_TIME);
           const actualizarLockQuery = `
         UPDATE tblipbloqueados 
         SET lock_until = ? 
         WHERE idUsuarios = ?`;
-          await pool.query(actualizarLockQuery, [lockTime, usuario.idUsuarios]);
+          await pool.query(actualizarLockQuery, [
+            lockTime,
+            usuario.idUsuarios,
+          ]);
           bloqueo.lock_until = lockTime;
         }
 
         // **3.2. Calcular el tiempo restante de bloqueo**
-        const tiempoRestanteSegundos = Math.ceil(
-          (bloqueo.lock_until - ahora) / 1000
-        );
+        const tiempoRestanteSegundos = Math.ceil((bloqueo.lock_until - ahora) / 1000);
         let tiempoRestanteMensaje;
         if (tiempoRestanteSegundos >= 60) {
           const minutos = Math.floor(tiempoRestanteSegundos / 60);
@@ -307,13 +327,14 @@ usuarioRouter.post("/login", async (req, res, next) => {
     const validPassword = await argon2.verify(usuario.password, contrasena);
 
     if (!validPassword) {
-      await handleFailedAttempt(ip, usuario.idUsuarios, pool);
+      await handleFailedAttempt(ip , usuario.idUsuarios, pool);
 
       return res.status(401).json({ message: "Credenciales Incorrectos" });
     }
     //==============================================================MFA ATIVADO=====================
-    console.log("Este es e multifactor", usuario.multifaltor);
+    console.log("Este es e multifactor",usuario.multifaltor);
 
+    
     if (usuario.multifaltor) {
       if (!tokenMFA) {
         return res.status(200).json({
@@ -335,9 +356,9 @@ usuarioRouter.post("/login", async (req, res, next) => {
         return res.status(400).json({ message: "Código MFA incorrecto." });
       }
     }
-    // Generar token JWT
+  // Generar token JWT
     const token = jwt.sign(
-      { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol },
+      { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol},
       SECRET_KEY,
       { expiresIn: "30m" }
     );
@@ -353,16 +374,15 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Insertar la sesión en tblsesiones
     try {
       const sessionQuery = `
-   INSERT INTO tblsesiones 
-(idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
-VALUES (?, ?, ?, ?, ?, ?, NULL)
-ON DUPLICATE KEY UPDATE 
-horaInicio = VALUES(horaInicio),
-direccionIP = VALUES(direccionIP),
-tipoDispositivo = VALUES(tipoDispositivo),
-cookie = VALUES(cookie),
-horaFin = NULL
-
+    INSERT INTO tblsesiones (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
+    VALUES (?, ?, ?, ?, ?, ?, NULL)
+    ON DUPLICATE KEY UPDATE
+      idUsuarios = VALUES(idUsuarios),
+      horaInicio = VALUES(horaInicio),
+      direccionIP = VALUES(direccionIP),
+      tipoDispositivo = VALUES(tipoDispositivo),
+      cookie = VALUES(cookie),
+      horaFin = NULL
   `;
       await pool.query(sessionQuery, [
         usuario.idUsuarios,
@@ -377,12 +397,13 @@ horaFin = NULL
       console.error("Error al insertar la sesión en tblsesiones:", insertError);
       next(error);
     }
+    
 
     // Responder con éxito
     res.json({
       message: "Login exitoso",
       user: {
-        idUsuarios: usuario.idUsuarios,
+        id: usuario.idUsuarios,
         nombre: usuario.nombre,
         rol: usuario.rol,
       },
@@ -408,7 +429,7 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
     [idUsuarios]
   );
 
-  console.log("Bloqueado23", result);
+  console.log("Bloqueado23", result)
 
   if (result.length === 0) {
     // Si no hay registros, insertamos uno nuevo
@@ -461,99 +482,93 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
   const token = req.cookies.sesionToken;
- 
   if (!token) {
     return res.status(403).json({ message: "No tienes token de acceso." });
   }
+
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
+    console.log("Token desifrado", decoded)
     const now = Date.now();
-    const sessionQuery = `
+     // Verificar si la sesión existe y está activa en la BD
+     const sessionQuery = `
      SELECT * FROM tblsesiones WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
    `;
-    const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
+   const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
 
-    if (sessions.length === 0) {
-      return res.status(401).json({
-        message:
-          "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
-      });
-    }
+   if (sessions.length === 0) {
+     return res.status(401).json({
+       message: "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
+     });
+   }
 
-    const lastInteraction = new Date(sessions[0].horaInicio).getTime();
-    const inactiveTime = now - lastInteraction;
+   const lastInteraction = new Date(sessions[0].horaInicio).getTime();
+   const inactiveTime = now - lastInteraction;
 
-    if (inactiveTime > INACTIVITY_TIMEOUT) {
-      await pool.query(
-        `UPDATE tblsesiones SET horaFin = NOW() WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL`,
-        [decoded.id, token]
-      );
-      res.clearCookie("sesionToken", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
-      });
-      return res
-        .status(401)
-        .json({ message: "Sesión cerrada por inactividad." });
-    }
+  
+   if (inactiveTime > INACTIVITY_TIMEOUT) {
+     await pool.query(
+       `UPDATE tblsesiones SET horaFin = NOW() WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL`,
+       [decoded.id, token]
+     );
+     res.clearCookie("sesionToken", { httpOnly: true, secure: true, sameSite: "None" });
+     return res.status(401).json({ message: "Sesión cerrada por inactividad." });
+   }
 
-    const timeRemaining = decoded.exp * 1000 - now;
-    if (timeRemaining < TOKEN_RENEW_THRESHOLD) {
-      const newToken = jwt.sign(
-        { id: decoded.id, nombre: decoded.nombre, rol: decoded.rol },
-        process.env.SECRET_KEY,
-        { expiresIn: "30m" }
-      );
+  
+   const timeRemaining = decoded.exp * 1000 - now;
+   if (timeRemaining < TOKEN_RENEW_THRESHOLD) {
+     const newToken = jwt.sign(
+       { id: decoded.id, nombre: decoded.nombre, rol: decoded.rol },
+       process.env.SECRET_KEY,
+       { expiresIn: "30m" }
+     );
 
-      res.cookie("sesionToken", newToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
-        maxAge: TOKEN_EXPIRATION_TIME,
-      });
+     res.cookie("sesionToken", newToken, {
+       httpOnly: true,
+       secure: process.env.NODE_ENV === "production",
+       sameSite: "None",
+       maxAge: TOKEN_EXPIRATION_TIME,
+     });
 
-      await pool.query(
-        `UPDATE tblsesiones SET cookie = ? WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL`,
-        [newToken, decoded.id, token]
-      );
+     await pool.query(
+       `UPDATE tblsesiones SET tokenSesion = ? WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL`,
+       [newToken, decoded.id, token]
+     );
+     console.log("Token renovado exitosamente.");
+   }
 
-      console.log("Token renovado exitosamente.");
-    }
-    req.user = decoded;
-    next();
-  } catch (error) {
-    if (error.name === "TokenExpiredError") {
-      return res
-        .status(401)
-        .json({ message: "El token ha expirado. Inicia sesión nuevamente." });
-    }
-    return res.status(500).json({ message: "Error en la autenticación." });
-  }
+   
+   req.user = decoded;
+   next();
+ } catch (error) {
+   if (error.name === "TokenExpiredError") {
+     return res.status(401).json({ message: "El token ha expirado. Inicia sesión nuevamente." });
+   }
+   return res.status(500).json({ message: "Error en la autenticación." });
+ }
 };
 
-usuarioRouter.post(
-  "/refresh-session",
-  verifyToken,
-  csrfProtection,
-  async (req, res) => {
+  // **Actualizar la sesión si el usuario sigue activo**
+usuarioRouter.post("/refresh-session", verifyToken,csrfProtection, async (req, res) => {
     const { id } = req.user;
     const token = req.cookies.sesionToken;
-
+  
     try {
       // Actualizar la última interacción del usuario en la base de datos
       await pool.query(
         `UPDATE tblsesiones SET horaInicio = NOW() WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL`,
         [id, token]
       );
-
+  
       res.json({ message: "Sesión actualizada correctamente." });
     } catch (error) {
       console.error("Error actualizando sesión:", error);
       res.status(500).json({ message: "Error interno del servidor." });
     }
-  }
-);
+  });
+  
+
 
 // Ruta protegida
 usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
@@ -584,13 +599,14 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
       u.idUsuarios = ?;
   `;
 
-    const [result] = await pool.query(query, [userId]);
+  const [result] = await pool.query(query, [userId]);
+ 
 
     if (result.length === 0) {
       return res.status(404).json({ message: "Usuario no encontrado." });
     }
 
-    const usuario = result[0];
+    const usuario = result[0];   
     res.json({
       message: "Perfil obtenido correctamente",
       user: {
@@ -601,12 +617,12 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
         correo: usuario.correo,
         telefono: usuario.telefono,
         rol: usuario.rol,
-        multifaltor: usuario.multifaltor,
+        multifaltor:usuario.multifaltor,
         direccion: usuario.direccion,
         fechaNacimiento: usuario.fechaNacimiento,
         fotoPerfil: usuario.fotoPerfil,
         fechaActualizacionF: usuario.fechaActualizacionF,
-        fechaCreacion: usuario.fechaCreacion,
+        fechaCreacion: usuario.fechaCreacion
       },
     });
   } catch (error) {
@@ -618,9 +634,8 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
 });
 
 //CCERRAMOS SESION
-usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
+usuarioRouter.post("/Delete/login",csrfProtection, async (req, res) => {
   const token = req.cookies.sesionToken;
-  console.log("ESte es el tookie que recibe", token);
   if (!token) {
     return res.status(400).json({ message: "No hay sesión activa." });
   }
@@ -629,27 +644,20 @@ usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
     const decoded = jwt.verify(token, SECRET_KEY);
     const userId = decoded.id;
 
+    // Actualizar la horaFin en tblsesiones
     const query = `
-    UPDATE tblsesiones
-    SET horaFin = NOW()
-     WHERE idUsuarios = ?
-        AND cookie = ?
-        AND horaFin IS NULL
+      UPDATE tblsesiones
+      SET horaFin = NOW()
+      WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
     `;
+    await pool.query(query, [userId, token]);
 
-    const [result] = await pool.query(query, [userId, token]);
-
-    if (result.affectedRows === 0) {
-      console.warn("⚠️ No se encontró una sesión activa para actualizar.");
-    } else {
-      console.log("✅ horaFin actualizada correctamente.");
-    }
     res.clearCookie("sesionToken", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "None",
     });
-    console.log("sesion cerrada correctamente");
+    console.log("sesion cerrada correctamente")
     res.json({ message: "Sesión cerrada correctamente." });
   } catch (error) {
     console.error("Error al cerrar la sesión:", error);
@@ -657,103 +665,6 @@ usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
   }
 });
 
-
-//CeRRAR TODAS LAS CESIONES
-usuarioRouter.post("/Delete/login/all-except-current", csrfProtection, async (req, res) => {
-  const token = req.cookies.sesionToken;
-
-  if (!token) {
-    return res.status(401).json({ message: "No hay sesión activa." });
-  }
-
-  try {
-  
-    const decoded = jwt.verify(token, SECRET_KEY);
-    const userId = decoded.id;
-    const query = `
-      UPDATE tblsesiones
-      SET horaFin = NOW()
-      WHERE idUsuarios = ? AND horaFin IS NULL AND cookie != ?
-    `;
-
-    const [result] = await pool.query(query, [userId, token]);
-
-    if (result.affectedRows === 0) {
-      console.warn("⚠️ No se encontraron sesiones activas para cerrar (excepto la actual).");
-      return res.status(404).json({ message: "No hay sesiones activas adicionales para cerrar." });
-    } else {
-      console.log(`✅ ${result.affectedRows} sesiones cerradas correctamente.`);
-    }
-
-    res.json({ message: `Se cerraron ${result.affectedRows} sesiones activas excepto la actual.` });
-  } catch (error) {
-    console.error("❌ Error al cerrar sesiones:", error);
-    res.status(500).json({ message: "Error interno al cerrar sesiones." });
-  }
-});
-
-//Sesiones
-usuarioRouter.post("/sesiones", csrfProtection, async (req, res) => {
-  const { userId } = req.body;
-  console.log("🔹 ID de usuario recibido para sesiones:", userId);
-
-  if (!userId) {
-    return res.status(400).json({ message: "El userId es obligatorio." });
-  }
-
-  try {
-    if (!pool) {
-      return res
-        .status(500)
-        .json({ message: "Error de conexión con la base de datos." });
-    }
-
-    // Obtener todas las sesiones activas del usuario
-    const [sessions] = await pool.query(
-      `
-          SELECT 
-              idSesion AS id,
-              idUsuarios,
-              direccionIP,
-              horaInicio,
-              horaFin,
-              tokenSesion,
-              tipoDispositivo,
-              cookie
-          FROM tblsesiones
-          WHERE idUsuarios = ? AND horaFin IS NULL
-          `,
-      [userId]
-    );
-
-    if (!sessions || sessions.length === 0) {
-      console.log("⚠️ No hay sesiones activas para este usuario.");
-      return res.json([]);
-    }
-
-    const currentToken = req.cookies?.sesionToken?.trim();
-
-    if (!currentToken) {
-      console.warn("⚠️ No se encontró token en la cookie");
-      return res.status(401).json({ message: "Sesión no encontrada." });
-    }
-
-    const sessionsWithCurrentFlag = sessions.map((session) => {
-      const tokenDB = session.cookie ? session.cookie.trim() : "";
-      return {
-        ...session,
-        isCurrent: tokenDB === currentToken,
-      };
-    });
-
-    res.json(sessionsWithCurrentFlag);
-  } catch (error) {
-    console.error("❌ Error al obtener las sesiones del usuario:", error);
-    res
-      .status(500)
-      .json({ message: "Error al obtener las sesiones del usuario." });
-  }
-});
 
 ///CODIGO MFA
 usuarioRouter.post("/enable-mfa", async (req, res) => {
@@ -801,14 +712,15 @@ usuarioRouter.post("/enable-mfa", async (req, res) => {
   }
 });
 
+
 //============================================================================
 //Actualizamos el foto de perfil
 usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
   const userId = req.params.id;
-  console.log("perfil", userId);
-  const { fotoPerfil } = req.body;
+  console.log("perfil", userId)
+  const { fotoPerfil } = req.body; 
 
-  console.log("perfil", fotoPerfil);
+  console.log("perfil", fotoPerfil)
   if (!fotoPerfil) {
     return res.status(400).json({ message: "Falta la imagen de perfil." });
   }
@@ -821,7 +733,7 @@ usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
     `;
     const [updateResult] = await pool.query(query, [
       fotoPerfil,
-      new Date().toISOString().slice(0, 19).replace("T", " "),
+      new Date().toISOString().slice(0, 19).replace('T', ' '), 
       userId,
     ]);
 
@@ -848,18 +760,10 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
   console.log("Datos recibidos:", { id, field, value });
 
   // Lista de campos permitidos
-  const allowedFields = [
-    "nombre",
-    "apellidoP",
-    "apellidoM",
-    "telefono",
-    "fechaNacimiento",
-  ];
+  const allowedFields = ["nombre", "apellidoP", "apellidoM", "telefono", "fechaNacimiento"];
 
   if (!allowedFields.includes(field)) {
-    return res
-      .status(400)
-      .json({ message: "Campo no permitido para actualización." });
+    return res.status(400).json({ message: "Campo no permitido para actualización." });
   }
 
   // Formatear nombre y apellidos (Primera letra mayúscula, resto minúsculas)
@@ -874,22 +778,21 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
 
     if (field === "fechaNacimiento") {
       console.log("Fecha recibida en el backend:", value);
-
+  
       const queryPerfil = `
         UPDATE tblperfilusuarios 
         SET fechaNacimiento = ? 
         WHERE idUsuarios = ?
       `;
       const [result] = await connection.query(queryPerfil, [value, id]);
-      console.log("Resulltado de fecha n", result);
-
+      console.log("Resulltado de fecha n", result)
+    
       if (result.affectedRows === 0) {
         await connection.rollback();
-        return res
-          .status(404)
-          .json({ message: "Perfil de usuario no encontrado." });
+        return res.status(404).json({ message: "Perfil de usuario no encontrado." });
       }
     } else {
+      
       const query = `UPDATE tblusuarios SET ${field} = ? WHERE idUsuarios = ?`;
       const [result] = await connection.query(query, [value, id]);
 
@@ -900,10 +803,7 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
     }
 
     await connection.commit();
-    res.json({
-      message: `${field} actualizado correctamente`,
-      updatedField: value,
-    });
+    res.json({ message: `${field} actualizado correctamente`, updatedField: value });
   } catch (error) {
     if (connection) await connection.rollback();
     console.error(`Error al actualizar ${field}:`, error);
@@ -913,13 +813,15 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
   }
 });
 
+
+
+
 //======================================
 
 //==================================================SOSPECHOSOS
 usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
   // Obtenemos el parámetro 'minIntentos' de la consulta o usamos el valor por defecto
-  const minIntentosReales =
-    parseInt(req.query.minIntentos) || MAX_FAILED_ATTEMPTS;
+  const minIntentosReales = parseInt(req.query.minIntentos) || MAX_FAILED_ATTEMPTS;
 
   try {
     const [usuarios] = await req.db.query(
@@ -954,6 +856,7 @@ usuarioRouter.post("/bloquear/:idUsuario", async (req, res) => {
   }
 });
 
+
 usuarioRouter.post("/desbloquear/:idUsuario", async (req, res) => {
   const { idUsuario } = req.params;
 
@@ -969,51 +872,53 @@ usuarioRouter.post("/desbloquear/:idUsuario", async (req, res) => {
   }
 });
 
+
 usuarioRouter.post("/validarToken/contrasena", async (req, res, next) => {
-  try {
-    const { idUsuario, token } = req.body;
+    try {
+      const { idUsuario, token } = req.body;
 
-    // Verificar si se recibieron los datos correctos
-    if (!idUsuario || !token) {
-      return res
-        .status(400)
-        .json({ message: "ID de usuario o token no proporcionado." });
+      // Verificar si se recibieron los datos correctos
+      if (!idUsuario || !token) {
+        return res
+          .status(400)
+          .json({ message: "ID de usuario o token no proporcionado." });
+      }
+
+      // Verificar el token en la tabla tbltoken
+      const queryToken =
+        "SELECT * FROM tbltoken WHERE idUsuario = ? AND token = ?";
+      const [tokenRecord] = await req.db.query(queryToken, [idUsuario, token]);
+
+      if (tokenRecord.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "Token inválido o no encontrado." });
+      }
+
+      // Verificar si el token ha expirado
+      const currentTime = Date.now();
+      const expirationTime = tokenRecord[0].expiration;
+
+      if (currentTime > expirationTime) {
+        return res.status(400).json({ message: "El token ha expirado." });
+      }
+
+      // Si el token es válido, eliminarlo de la tabla tbltoken
+      const deleteTokenQuery =
+        "DELETE FROM tbltoken WHERE idUsuario = ? AND token = ?";
+      await req.db.query(deleteTokenQuery, [idUsuario, token]);
+
+      // Si todo es correcto
+      return res.status(200).json({
+        message:
+          "Token válido. Puede proceder con el cambio de contraseña. El token ha sido eliminado.",
+      });
+    } catch (error) {
+      console.error("Error al validar el token:", error);
+      return res.status(500).json({ message: "Error al validar el token." });
     }
-
-    // Verificar el token en la tabla tbltoken
-    const queryToken =
-      "SELECT * FROM tbltoken WHERE idUsuario = ? AND token = ?";
-    const [tokenRecord] = await req.db.query(queryToken, [idUsuario, token]);
-
-    if (tokenRecord.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "Token inválido o no encontrado." });
-    }
-
-    // Verificar si el token ha expirado
-    const currentTime = Date.now();
-    const expirationTime = tokenRecord[0].expiration;
-
-    if (currentTime > expirationTime) {
-      return res.status(400).json({ message: "El token ha expirado." });
-    }
-
-    // Si el token es válido, eliminarlo de la tabla tbltoken
-    const deleteTokenQuery =
-      "DELETE FROM tbltoken WHERE idUsuario = ? AND token = ?";
-    await req.db.query(deleteTokenQuery, [idUsuario, token]);
-
-    // Si todo es correcto
-    return res.status(200).json({
-      message:
-        "Token válido. Puede proceder con el cambio de contraseña. El token ha sido eliminado.",
-    });
-  } catch (error) {
-    console.error("Error al validar el token:", error);
-    return res.status(500).json({ message: "Error al validar el token." });
   }
-});
+);
 
 usuarioRouter.post("/verify-password", async (req, res) => {
   const { idUsuario, currentPassword } = req.body;
@@ -1193,5 +1098,7 @@ usuarioRouter.get("/:idUsuario/sesiones", async (req, res, next) => {
       .json({ message: "Error al obtener las sesiones del usuario." });
   }
 });
+
+
 
 module.exports = usuarioRouter;

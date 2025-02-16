@@ -10,6 +10,8 @@ const now = new Date();
 const crypto = require("crypto");
 const { Console } = require("console");
 
+const {sendEmail}  =require('./SMTP.JS')
+
 // Cola de correos
 const emailQueue = new Queue("emailQueue");
 
@@ -188,14 +190,8 @@ emailRouter.post("/send", csrfProtection, async (req, res) => {
       `,
     };
 
-    // Enviar el correo de verificación
-    const response = await axios.post("https://api.brevo.com/v3/smtp/email", emailData, {
-      headers: {
-        accept: "application/json",
-        "api-key": process.env.API_KEY,
-        "content-type": "application/json",
-      },
-    });
+
+    const emailResponse = await sendEmail(correo, "Código de verificación - Alquiladora Romero", emailData.htmlContent);
 
     res.status(200).json({ message: "Email enviado con éxito" });
   } catch (error) {

@@ -3,9 +3,11 @@ const express = require('express');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const cors = require("cors");
+//=====================RUTAS==========================
 const routers = require('./rutas');
 const connect = require('./connectBd');
 
+//==================================================
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -15,7 +17,7 @@ app.use(helmet());
 app.use(cookieParser());
 
 // Configuración de CORS
-const allowedOrigins = ['http://localhost:3001', 'https://alquiladoraromero.isoftuthh.com', 'https://alquiladora-romero-backed-1.onrender.com', 'http://localhost:3000'];
+const allowedOrigins = ['http://localhost:3001', 'https://alquiladoraromero.bina5.com', 'https://alquiladora-romero-backed-1.onrender.com', 'http://localhost:3000'];
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -34,29 +36,31 @@ app.use(cors({
 (async () => {
   try {
     await connect.connect();
-    console.log('Conexión a la base de datos establecida');
+    console.log('✅ Conexión a la base de datos establecida');
   } catch (error) {
-    console.error('Fallo al conectar a la base de datos', error);
+    console.error('❌ Fallo al conectar a la base de datos:', error);
   }
 })();
 
 
-// Middleware para manejar errores 500
+//=================RUTAS DEFINIDOS=======================
+app.use('/api', routers);
+
+//=======================================================
+
+// 📌 **Middleware Global para Manejo de Errores 500**
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error("⚠️ Error detectado:", err.stack);
   res.status(500).json({ 
     error: "Error interno del servidor",
     message: err.message 
   });
-})
-
-app.use('/api', routers);
-
-//Error 500
-app.get('/ping', (req, res) => {
-  res.status(200).send('Servidor en línea');
 });
 
+
+
+
+
 app.listen(port, () => {
-  console.log(`Servidor en http://localhost:${port}`);
+  console.log(`🚀Servidor en http://localhost:${port}`);
 });
