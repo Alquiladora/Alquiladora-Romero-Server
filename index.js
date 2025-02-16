@@ -31,6 +31,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
   credentials: true,
 }));
+app.options('*', cors());
 
 // Conectar a la base de datos
 (async () => {
