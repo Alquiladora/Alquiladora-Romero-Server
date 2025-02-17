@@ -8,6 +8,7 @@ const ClsImagenes= require("./consultas/clsImagenes")
 const ClsSesiones = require("./consultas/clssesiones")
 const {csrfProtection} =require('./config/csrf')
 const clsMfa= require("./consultas/mfa")
+
 router.get('/get-csrf-token',csrfProtection , (req, res) => {
     res.json({ csrfToken: req.csrfToken() });
   });
