@@ -143,59 +143,11 @@ emailRouter.post("/send", csrfProtection, async (req, res) => {
     await pool.query(query, values);
 
    
-    const emailData = {
-      sender: { name: "Alquiladora Romero", email: "alquiladoraromero@isoftuthh.com" },
-      to: [{ email: correo, name: destinatario }],
-      subject: "Código de verificación - Alquiladora Romero",
-      htmlContent: `
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f9f9f9; padding: 20px;">
-          <div style="max-width: 600px; margin: auto; padding: 20px; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);">
-            <div style="text-align: center; padding: 20px 0; border-bottom: 2px solid #eee;">
-              <h1 style="color: #007BFF; margin: 0;">Alquiladora Romero</h1>
-              <p style="font-size: 14px; color: #666; margin: 5px 0;">Tu mejor aliado en renta de mobiliario</p>
-            </div>
-
-            <div style="padding: 20px;">
-              <h2 style="color: #28A745; font-size: 24px; text-align: center;">Código de Verificación</h2>
-              <p style="font-size: 16px; text-align: center; color: #555; margin-top: 10px;">Hola <strong>${destinatario}</strong>,</p>
-              <p style="font-size: 16px; text-align: center; color: #555;">Gracias por confiar en nosotros. Para continuar con el proceso, ingresa el siguiente código en los próximos <strong style="color: #FF5722;">10 minutos</strong>:</p>
-
-              <div style="margin: 20px auto; text-align: center;">
-                <p style="font-size: 32px; font-weight: bold; color: #007BFF; border: 2px dashed #007BFF; padding: 10px; border-radius: 8px; display: inline-block;">${shortUUID}</p>
-              </div>
-
-              <p style="font-size: 14px; text-align: center; color: #888;">Si el código no se utiliza dentro del tiempo establecido, deberás solicitar uno nuevo.</p>
-            </div>
-
-            <div style="margin-top: 20px; padding: 15px; background-color: #f1f1f1; border-radius: 8px; text-align: center;">
-              <p style="font-size: 14px; color: #555;">¿Tienes dudas? Contáctanos en:</p>
-              <p style="font-size: 14px; color: #555; margin: 5px 0;"><a href="mailto:alquiladoraromero@isoftuthh.com" style="color: #007BFF; text-decoration: none;">alquiladoraromero@isoftuthh.com</a></p>
-            </div>
-
-            <div style="text-align: center; margin-top: 20px;">
-              <p style="font-size: 14px; color: #555;">Síguenos en nuestras redes sociales:</p>
-              <div style="display: inline-flex; justify-content: center; gap: 15px; margin-top: 10px;">
-                <a href="https://www.facebook.com/ALQROMERO" target="_blank" style="text-decoration: none;">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/5/51/Facebook_f_logo_%282019%29.svg" alt="Facebook" style="width: 30px; height: 30px;" />
-                </a>
-                <a href="https://www.facebook.com/ALQROMERO" target="_blank" style="text-decoration: none;">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram" style="width: 30px; height: 30px;" />
-                </a>
-              </div>
-            </div>
-
-            <div style="border-top: 1px solid #eee; padding-top: 15px; margin-top: 20px; text-align: center; font-size: 12px; color: #777;">
-              <p>Este es un mensaje generado automáticamente. Por favor, no respondas a este correo.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-    };
 
 
-    const emailResponse = await sendEmail(correo, "Código de verificación - Alquiladora Romero", emailData.htmlContent);
+    const emailContent =generarContentRegistro(destinatario, shortUUID);
+
+    await sendEmail(correo, "Código de verificación - Alquiladora Romero",  emailContent);
 
     res.status(200).json({ message: "Email enviado con éxito" });
   } catch (error) {
@@ -278,6 +230,54 @@ function generateEmailContent(destinatario, token) {
       </div>
     </body>
     </html>
+  `;
+}
+
+function generarContentRegistro(destinatario, shortUUID){
+   return `
+  <html>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f9f9f9; padding: 20px;">
+    <div style="max-width: 600px; margin: auto; padding: 20px; border-radius: 8px; background-color: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);">
+      <div style="text-align: center; padding: 20px 0; border-bottom: 2px solid #eee;">
+        <h1 style="color: #007BFF; margin: 0;">Alquiladora Romero</h1>
+        <p style="font-size: 14px; color: #666; margin: 5px 0;">Tu mejor aliado en renta de mobiliario</p>
+      </div>
+
+      <div style="padding: 20px;">
+        <h2 style="color: #28A745; font-size: 24px; text-align: center;">Código de Verificación</h2>
+        <p style="font-size: 16px; text-align: center; color: #555; margin-top: 10px;">Hola <strong>${destinatario}</strong>,</p>
+        <p style="font-size: 16px; text-align: center; color: #555;">Gracias por confiar en nosotros. Para continuar con el proceso, ingresa el siguiente código en los próximos <strong style="color: #FF5722;">10 minutos</strong>:</p>
+
+        <div style="margin: 20px auto; text-align: center;">
+          <p style="font-size: 32px; font-weight: bold; color: #007BFF; border: 2px dashed #007BFF; padding: 10px; border-radius: 8px; display: inline-block;">${shortUUID}</p>
+        </div>
+
+        <p style="font-size: 14px; text-align: center; color: #888;">Si el código no se utiliza dentro del tiempo establecido, deberás solicitar uno nuevo.</p>
+      </div>
+
+      <div style="margin-top: 20px; padding: 15px; background-color: #f1f1f1; border-radius: 8px; text-align: center;">
+        <p style="font-size: 14px; color: #555;">¿Tienes dudas? Contáctanos en:</p>
+        <p style="font-size: 14px; color: #555; margin: 5px 0;"><a href="mailto:alquiladoraromero@isoftuthh.com" style="color: #007BFF; text-decoration: none;">alquiladoraromero@isoftuthh.com</a></p>
+      </div>
+
+      <div style="text-align: center; margin-top: 20px;">
+        <p style="font-size: 14px; color: #555;">Síguenos en nuestras redes sociales:</p>
+        <div style="display: inline-flex; justify-content: center; gap: 15px; margin-top: 10px;">
+          <a href="https://www.facebook.com/ALQROMERO" target="_blank" style="text-decoration: none;">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/5/51/Facebook_f_logo_%282019%29.svg" alt="Facebook" style="width: 30px; height: 30px;" />
+          </a>
+          <a href="https://www.facebook.com/ALQROMERO" target="_blank" style="text-decoration: none;">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram" style="width: 30px; height: 30px;" />
+          </a>
+        </div>
+      </div>
+
+      <div style="border-top: 1px solid #eee; padding-top: 15px; margin-top: 20px; text-align: center; font-size: 12px; color: #777;">
+        <p>Este es un mensaje generado automáticamente. Por favor, no respondas a este correo.</p>
+      </div>
+    </div>
+  </body>
+  </html>
   `;
 }
 
