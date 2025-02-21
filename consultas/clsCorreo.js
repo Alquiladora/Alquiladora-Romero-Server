@@ -9,11 +9,18 @@ const Queue = require("bull");
 const now = new Date();
 const crypto = require("crypto");
 const { Console } = require("console");
+const moment = require('moment');
+
+
+
+
+
 
 const {sendEmail}  =require('./SMTP.JS')
 
 // Cola de correos
 const emailQueue = new Queue("emailQueue");
+const TOKEN_EXPIRATION_MINUTES = 10;
 
 const validateEmailFormat = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -80,20 +87,17 @@ function generarToken() {
 
 //Funcion para crearFechaToken
 function getTokenCreationTime() {
-  return new Date().toISOString();
+  return moment().tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss");
 }
 
-function getTokenExpirationTime(creationTimeISO, expirationInMinutes) {
-  const creationTime = new Date(creationTimeISO);
-  if (isNaN(creationTime.getTime())) {
-    throw new Error(`Fecha de creación inválida: ${creationTimeISO}`);
+function getTokenExpirationTime(creationTime, expirationInMinutes) {
+  const creationMoment = moment.tz(creationTime, "America/Mexico_City");
+  if (!creationMoment.isValid()) {
+    throw new Error(`Fecha de creación inválida: ${creationTime}`);
   }
-  const expirationTime = new Date(
-    creationTime.getTime() + expirationInMinutes * 60 * 1000
-  );
-  return expirationTime.toISOString();
+  
+  return creationMoment.add(expirationInMinutes, "minutes").format("YYYY-MM-DD HH:mm:ss");
 }
-
 // Enviar token al correo
 
 
@@ -113,7 +117,7 @@ emailRouter.post("/send", csrfProtection, async (req, res) => {
 
   // Creación del token
   const creacioToken = getTokenCreationTime();
-  const caducidadToken = getTokenExpirationTime(creacioToken, 10);
+  const caducidadToken =getTokenExpirationTime(creacioToken, 10);;
   const destinatario = nombreR || "Cliente";
 
   console.log("Datos enviados al correo:", correo, shortUUID);
@@ -199,6 +203,84 @@ emailRouter.post("/send", csrfProtection, async (req, res) => {
     res.status(500).json({ message: "Error al enviar el email", error: error.message });
   }
 });
+
+
+//cambiamos la contrseña desde perfil
+emailRouter.post('/cambiarpass',csrfProtection,  async (req, res) => {
+  const { correo, nombreU,rol } = req.body;
+  console.log(correo, nombreU)
+  const shortUUID = generarToken();
+  const currentDate =getTokenCreationTime();
+  const  expiration = getTokenExpirationTime(currentDate,10);
+ 
+  
+  try {
+  
+    const checkTokenQuery = `SELECT * FROM tbltokens WHERE correo = ?`;
+    const [existingToken] = await  pool.query(checkTokenQuery, [correo]);
+
+    if (existingToken.length > 0) {
+      const updateTokenQuery = `
+        UPDATE tbltokens 
+        SET token = ?, fechaCreacion=?, fechaExpiracion = ?, destinatario=?
+        WHERE correo = ?
+      `;
+      await  pool.query(updateTokenQuery, [shortUUID,   currentDate,expiration, rol, correo]);
+    } else {
+      const insertTokenQuery = `
+        INSERT INTO tbltokens (token,fechaCreacion,fechaExpiracion, correo, destinatario) 
+        VALUES (?, ?, ?, ?, ?)
+      `;
+      await  pool.query(insertTokenQuery, [shortUUID,  currentDate,expiration, correo,rol ]);
+    }
+
+    const destinatario = nombreU || 'Cliente';
+    const emailContent = generateEmailContent(destinatario, shortUUID);
+    await sendEmail(correo, "Código de verificación - Alquiladora Romero", emailContent);
+
+    res.status(200).json({ message: "Token enviado exitosamente" });
+  } catch (error) {
+    console.error('Error al enviar el token o guardar en la base de datos:', error);
+    res.status(500).json({ message: 'Error al enviar el token o guardar en la base de datos' });
+  }
+});
+
+
+function generateEmailContent(destinatario, token) {
+  return `
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f5f5f5; padding: 20px;">
+      <div style="max-width: 600px; margin: auto; padding: 20px; border-radius: 8px; background-color: #fff; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);">
+        
+        <!-- Encabezado -->
+        <div style="text-align: center; padding: 20px; border-bottom: 2px solid #eee;">
+          <h1 style="color: #007BFF; margin: 0;">Alquiladora Romero</h1>
+          <p style="font-size: 14px; color: #666;">Solicitud de cambio de contraseña</p>
+        </div>
+
+        <!-- Contenido Principal -->
+        <div style="padding: 20px; text-align: center;">
+          <h2 style="color: #28A745; font-size: 22px; margin-bottom: 20px;">Código de Verificación</h2>
+          <p style="font-size: 16px; margin: 0 0 10px;">Hola, <strong>${destinatario}</strong></p>
+          <p style="font-size: 16px; margin: 10px 0;">Hemos recibido tu solicitud para cambiar la contraseña. Por favor, utiliza el siguiente código:</p>
+          <div style="margin: 20px 0;">
+            <span style="font-size: 28px; font-weight: bold; color: #007BFF; border: 2px dashed #007BFF; padding: 10px 20px; border-radius: 5px;">${token}</span>
+          </div>
+          <p style="font-size: 16px; margin: 10px 0;">Este código es válido por <strong style="color: #FF5722;">${TOKEN_EXPIRATION_MINUTES} minutos</strong>.</p>
+          <p style="font-size: 14px; color: #FF0000; margin-top: 20px;">Si no solicitaste este cambio, ignora este mensaje.</p>
+        </div>
+
+        <!-- Pie de página -->
+        <div style="text-align: center; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+          <p style="font-size: 14px; color: #777;">Este es un mensaje automático, por favor no respondas a este correo.</p>
+          <p style="font-size: 12px; color: #999;">Alquiladora Romero | Calle Ejemplo #123, Ciudad, País</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 
 
 module.exports = emailRouter;

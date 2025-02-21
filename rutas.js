@@ -13,6 +13,12 @@ router.get('/get-csrf-token',csrfProtection , (req, res) => {
     res.json({ csrfToken: req.csrfToken() });
   });
 
+  //Ping de conectividad
+  router.get("/status", (req, res) => {
+    res.status(200).json({ status: "ok" });
+  });
+  
+
 //=========================RUTAS=======================================
 
 // 📌 **Definir Rutas**
