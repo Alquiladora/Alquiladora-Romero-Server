@@ -959,6 +959,7 @@ usuarioRouter.post("/validarToken/contrasena",csrfProtection, async (req, res, n
     // Buscar el token en la tabla tbltokens
     const queryToken = "SELECT * FROM tbltokens WHERE correo = ? AND token = ?";
     const [tokenRecords] = await pool.query(queryToken, [correo, token]);
+    console.log("Este es el resultado del token", tokenRecords)
 
     if (!tokenRecords.length) {
       return res
