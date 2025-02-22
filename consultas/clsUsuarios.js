@@ -979,11 +979,15 @@ usuarioRouter.post("/validarToken/contrasena",csrfProtection, async (req, res, n
     if (currentTime > expirationDate) {
       return res.status(400).json({ message: "El token ha expirado." });
     }
+    
+    console.log(res.status(400),"este es el resultado de envio")
    
 
     // Eliminar el token (se corrigió "corrreo" por "correo")
     const deleteTokenQuery = "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
     await pool.query(deleteTokenQuery, [correo, token]);
+
+    console.log(res.status(200),"este es el resultado de envio")
 
     return res.status(200).json({
       message:
