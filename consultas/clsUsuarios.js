@@ -1192,9 +1192,9 @@ usuarioRouter.get("/vecesCambioPass", async (req, res) => {
     return res.status(200).json({
       idUsuario,
       cambiosRealizados: totalCambios,
-      limitePermitido: 3,
-      puedeCambiar: totalCambios < 3,
-      message: totalCambios >= 3 
+      limitePermitido: 20,
+      puedeCambiar: totalCambios < 20,
+      message: totalCambios >= 20 
         ? "Has alcanzado el límite de cambios de contraseña este mes."
         : "Aún puedes cambiar tu contraseña."
     });
