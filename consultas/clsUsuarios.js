@@ -1209,16 +1209,16 @@ usuarioRouter.get("/vecesCambioPass", async (req, res) => {
 usuarioRouter.get("/lista", async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
- SELECT 
+      SELECT 
       u.idUsuarios,
-      u.Correo,
-      u.Nombre,
-      u.ApellidoP,
-      u.ApellidoM,
-      u.Rol,
+      u.correo,
+      u.nombre,
+      u.apellidoP,
+      u.apellidoM,
+      u.rol,
       (SELECT COUNT(*) FROM tblipbloqueados WHERE idUsuarios = u.idUsuarios) AS veces_bloqueado,
       (SELECT COUNT(*) FROM tblhistorialpass WHERE idUsuarios = u.idUsuarios) AS cambios_contrasena,
-      (SELECT COUNT(*) FROM tblsesiones WHERE idUsuario = u.idUsuarios) AS veces_sesion
+      (SELECT COUNT(*) FROM tblsesiones WHERE idUsuarios = u.idUsuarios) AS veces_sesion
     FROM 
       tblusuarios u
     `);

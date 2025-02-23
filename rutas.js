@@ -6,6 +6,7 @@ const clsToken= require('./consultas/clsToken');
 const ClsAuditoria= require('./consultas/clsAuditoria')
 const ClsImagenes= require("./consultas/clsImagenes")
 const ClsSesiones = require("./consultas/clssesiones")
+const ClsProductos= require("./consultas/clsProductos")
 const {csrfProtection} =require('./config/csrf')
 const clsMfa= require("./consultas/mfa")
 
@@ -29,6 +30,7 @@ router.use('/auditoria',ClsAuditoria);
 router.use('/imagenes',ClsImagenes);
 router.use('/mfa',clsMfa);
 router.use('/sesiones',ClsSesiones);
+router.use('/productos',ClsProductos);
 
 
 
