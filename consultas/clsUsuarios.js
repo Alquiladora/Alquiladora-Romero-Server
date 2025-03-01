@@ -23,7 +23,7 @@ usuarioRouter.use(cookieParser());
 const SECRET_KEY = process.env.SECRET_KEY.padEnd(32, " ");
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_TIME = 10 * 60 * 1000;
-const TOKEN_EXPIRATION_TIME = 30 * 60 * 1000;
+const TOKEN_EXPIRATION_TIME = 24 * 60 * 60 * 1000;
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; //10 mnts
 const TOKEN_RENEW_THRESHOLD = 2 * 60 * 1000;
 
@@ -77,7 +77,7 @@ function getOrCreateClientId(req, res) {
     clientId = uuidv4();
     const encryptedClientId = encryptClientId(clientId);
     res.cookie("clientId", encryptedClientId, {
-      maxAge: 60 * 60 * 1000,
+      maxAge: 365 * 24 * 60 * 60 * 1000, 
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "None",
@@ -214,7 +214,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     }
 
     //capchapt token obtenido
-    const cookiesId = getOrCreateClientId(req, res);
+    const cookiesId = uuidv4();
 
     // Verificar si la conexión a la base de datos está disponible
     if (!pool) {
@@ -342,7 +342,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     const token = jwt.sign(
       { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol },
       SECRET_KEY,
-      { expiresIn: "30m" }
+      { expiresIn: "24h" }
     );
 
     // Crear la cookie de sesión
@@ -356,25 +356,27 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Insertar la sesión en tblsesiones
     try {
       const sessionQuery = `
-   INSERT INTO tblsesiones 
-(idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
-VALUES (?, ?, ?, ?, ?, ?, NULL)
-ON DUPLICATE KEY UPDATE 
-horaInicio = VALUES(horaInicio),
-direccionIP = VALUES(direccionIP),
-tipoDispositivo = VALUES(tipoDispositivo),
-cookie = VALUES(cookie),
-horaFin = NULL
+      INSERT INTO tblsesiones 
+        (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
+      VALUES (?, ?, ?, ?, ?, ?, NULL)
+    `;
+    
+    await pool.query(sessionQuery, [
+      usuario.idUsuarios,
+      cookiesId,     
+      clientTimestamp,  
+      ip,               
+      deviceType,       
+      token             
+    ]);
 
-  `;
-      await pool.query(sessionQuery, [
-        usuario.idUsuarios,
+      console.log("Datso recibidos de sesiones ", usuario.idUsuarios,
         cookiesId,
         clientTimestamp,
         ip,
         deviceType,
-        token,
-      ]);
+        token,);
+
       console.log("Sesión insertada en tblsesiones");
     } catch (insertError) {
       console.error("Error al insertar la sesión en tblsesiones:", insertError);
@@ -465,54 +467,25 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
   const token = req.cookies.sesionToken;
+  console.log("Token valido", token)
 
   if (!token) {
     return res.status(403).json({ message: "No tienes token de acceso." });
   }
 
   try {
-   
     const decoded = jwt.verify(token, SECRET_KEY);
-    console.log("✅ Token verificado:", decoded);
-
-    const now = Date.now();
-
-  
     const sessionQuery = `
       SELECT * FROM tblsesiones WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
     `;
     const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
+    console.log("Sesion valida", sessions)
+    console.log("Decode ", decoded)
 
     if (sessions.length === 0) {
       return res.status(401).json({
         message: "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
       });
-    }
-
-    
-    const timeRemaining = decoded.exp * 1000 - now;
-    console.log("⌛ Tiempo restante del token:", timeRemaining, "ms");
-
-    if (timeRemaining < TOKEN_RENEW_THRESHOLD) {
-      const newToken = jwt.sign(
-        { id: decoded.id, nombre: decoded.nombre, rol: decoded.rol },
-        SECRET_KEY,
-        { expiresIn: "30m" }
-      );
-
-      res.cookie("sesionToken", newToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
-        maxAge: TOKEN_EXPIRATION_TIME,
-      });
-
-      await pool.query(
-        `UPDATE tblsesiones SET cookie = ? WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL`,
-        [newToken, decoded.id, token]
-      );
-
-      console.log("🔄 Token renovado exitosamente.");
     }
 
     req.user = decoded;
@@ -1209,7 +1182,7 @@ usuarioRouter.get("/vecesCambioPass", async (req, res) => {
 usuarioRouter.get("/lista", async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
-      SELECT 
+ SELECT 
       u.idUsuarios,
       u.correo,
       u.nombre,

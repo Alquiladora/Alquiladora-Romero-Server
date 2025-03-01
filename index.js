@@ -17,7 +17,12 @@ app.use(helmet());
 app.use(cookieParser());
 
 // Configuración de CORS
-const allowedOrigins = ['http://localhost:3001', 'https://alquiladora-romero-server.onrender.com', 'https://alquiladora-romero-server.onrender.com', 'http://localhost:3000', 'https://alquiladoraromero.bina5.com'];
+const allowedOrigins = [
+  'http://localhost:3001',
+  'https://alquiladora-romero-server.onrender.com',
+  'http://localhost:3000',
+  'https://alquiladoraromero.bina5.com'
+];
 
 app.use(cors({
   origin: (origin, callback) => {
