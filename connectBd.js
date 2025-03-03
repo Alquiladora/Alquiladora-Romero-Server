@@ -8,11 +8,13 @@ const pool = mysql.createPool({
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     waitForConnections: true, 
-    connectionLimit: 10,
+    connectionLimit: 20,
     queueLimit: 0,
+    connectTimeout: 20000,
+  
 });
 
-// Función de conexión (se mantiene para controlar la conexión)
+
 const connect = async () => {
     let connection;
     try {
@@ -28,7 +30,7 @@ const connect = async () => {
     }
 };
 
-// Exportar el pool y la función de conexión
+
 module.exports = {
     pool,
     connect,

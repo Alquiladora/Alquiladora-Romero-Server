@@ -9,6 +9,11 @@ const ClsSesiones = require("./consultas/clssesiones")
 const ClsProductos= require("./consultas/clsProductos")
 const {csrfProtection} =require('./config/csrf')
 const clsMfa= require("./consultas/mfa")
+const ClsEmpresa = require("./consultas/clsEmpresa")
+const ClsPoliticas = require("./consultas/clsPoliticas")
+const ClsTerminos= require("./consultas/clsTerminos")
+const  ClsDeslindes= require("./consultas/clsDeslin")
+const  ClsSobreNosotros= require("./consultas/clsSobreNosotros")
 
 router.get('/get-csrf-token',csrfProtection , (req, res) => {
     res.json({ csrfToken: req.csrfToken() });
@@ -31,6 +36,12 @@ router.use('/imagenes',ClsImagenes);
 router.use('/mfa',clsMfa);
 router.use('/sesiones',ClsSesiones);
 router.use('/productos',ClsProductos);
+router.use('/empresa',ClsEmpresa);
+router.use('/politicas',ClsPoliticas);
+router.use('/terminos',ClsTerminos);
+router.use('/deslin',ClsDeslindes);
+router.use('/sobrenosotros',ClsSobreNosotros);
+
 
 
 

@@ -467,7 +467,7 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
   const token = req.cookies.sesionToken;
-  console.log("Token valido", token)
+
 
   if (!token) {
     return res.status(403).json({ message: "No tienes token de acceso." });
@@ -479,8 +479,6 @@ const verifyToken = async (req, res, next) => {
       SELECT * FROM tblsesiones WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
     `;
     const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
-    console.log("Sesion valida", sessions)
-    console.log("Decode ", decoded)
 
     if (sessions.length === 0) {
       return res.status(401).json({
@@ -642,7 +640,7 @@ usuarioRouter.post("/Delete/login/all-except-current", csrfProtection, async (re
 //Sesiones
 usuarioRouter.post("/sesiones", csrfProtection, async (req, res) => {
   const { userId } = req.body;
-  console.log("🔹 ID de usuario recibido para sesiones:", userId);
+
 
   if (!userId) {
     return res.status(400).json({ message: "El userId es obligatorio." });
@@ -865,14 +863,15 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
 
 //==================================================SOSPECHOSOS
 usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
-  // Obtenemos el parámetro 'minIntentos' de la consulta o usamos el valor por defecto
-  const minIntentosReales =
-    parseInt(req.query.minIntentos) || MAX_FAILED_ATTEMPTS;
+  const minIntentosReales = req.query.minIntentos !== undefined 
+    ? parseInt(req.query.minIntentos) 
+    : MAX_FAILED_ATTEMPTS;
+  
+
 
   try {
-    const [usuarios] = await req.db.query(
-      `SELECT u.idUsuarios, u.Nombre, u.ApellidoP, u.Correo,
-              b.intentos AS Intentos,
+    const [usuarios] = await pool.query(
+      `SELECT u.idUsuarios, u.nombre, u.apellidoP, u.correo,u.rol,u.telefono,
               b.intentosReales AS IntentosReales,
               b.bloqueado
        FROM tblusuarios u
@@ -889,12 +888,13 @@ usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
 
 usuarioRouter.post("/bloquear/:idUsuario", async (req, res) => {
   const { idUsuario } = req.params;
-
+  
   try {
-    await req.db.query(
+    await pool.query(
       `UPDATE tblipbloqueados SET bloqueado = TRUE WHERE idUsuarios = ?`,
       [idUsuario]
     );
+    console.log("Usuarios bloqeuado correcatmente ")
     res.status(200).json({ message: "Usuario bloqueado manualmente." });
   } catch (error) {
     console.error("Error al bloquear usuario:", error);
@@ -906,7 +906,7 @@ usuarioRouter.post("/desbloquear/:idUsuario", async (req, res) => {
   const { idUsuario } = req.params;
 
   try {
-    await req.db.query(
+    await pool.query(
       `UPDATE tblipbloqueados SET  bloqueado = FALSE, Intentos = 0,  lock_until = NULL WHERE idUsuarios = ?`,
       [idUsuario]
     );
@@ -1228,5 +1228,21 @@ usuarioRouter.get("/:idUsuario/sesiones", async (req, res, next) => {
       .json({ message: "Error al obtener las sesiones del usuario." });
   }
 });
+
+//TOTAL DE USARIOS
+
+usuarioRouter.get("/totalUsuarios", async (req, res, next) => {
+  try {
+    const [usuarios] = await pool.query(`
+ SELECT COUNT(*) AS totalUsuarios
+FROM tblusuarios;
+    `);
+    res.json(usuarios);
+  } catch (error) {
+    console.error("Error al obtener total de usarios:", error);
+    res.status(500).json({ message: "Error al obtener total de usarios." });
+  }
+});
+
 
 module.exports = usuarioRouter;

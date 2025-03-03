@@ -17,10 +17,11 @@ auditoriaRouter.use(express.json());
 auditoriaRouter.use(cookieParser());
 
 
-//Insertamos la auditoria
+
 auditoriaRouter.post("/auditoria",csrfProtection, async (req, res) => {
-    const { usuario, correo, accion, dispositivo, ip, fecha_hora, detalles } =
+    const { usuario, correo, accion, dispositivo, ip, detalles } =
       req.body;
+      const fecha_hora = new Date().toLocaleString("sv-SE", { timeZone: "America/Mexico_City" });
   
     try {
       const query = `
@@ -48,7 +49,7 @@ auditoriaRouter.post("/auditoria",csrfProtection, async (req, res) => {
     }
   });
 
-  //Consulta de auditoria
+ 
   auditoriaRouter.get("/auditoria/lista", async (req, res) => {
     try {
       const query = `
@@ -65,7 +66,7 @@ auditoriaRouter.post("/auditoria",csrfProtection, async (req, res) => {
         ORDER BY fecha_hora DESC
       `;
   
-      const [auditorias] = await req.db.query(query);
+      const [auditorias] = await pool.query(query);
   
       res.status(200).json(auditorias);
       console.log("Auditoria registrado hoy correcatmemte")
