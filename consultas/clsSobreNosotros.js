@@ -1,3 +1,4 @@
+// routerSobreNosotros.js
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const { pool } = require("../connectBd");
@@ -7,21 +8,20 @@ const routerSobreNosotros = express.Router();
 routerSobreNosotros.use(express.json());
 routerSobreNosotros.use(cookieParser());
 
-
 routerSobreNosotros.get("/", async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
-   
+  
     const [rows] = await connection.query(
       "SELECT * FROM tblsobrenosotros ORDER BY id ASC LIMIT 1"
     );
 
     if (rows.length === 0) {
-
-      return res.json({}); 
       
+      return res.json({});
     }
+    
     res.json(rows[0]);
   } catch (error) {
     console.error("Error al obtener la información de SobreNosotros:", error);
@@ -46,19 +46,20 @@ routerSobreNosotros.post("/", csrfProtection, async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
-    // Verificar si ya existe un registro
+
+    
     const [rowsCheck] = await connection.query(
       "SELECT id FROM tblsobrenosotros LIMIT 1"
     );
 
     if (rowsCheck.length > 0) {
-     
+    
       return res
         .status(409)
         .json({ error: "Ya existe información de 'Sobre Nosotros'" });
     }
 
-
+    // Si no existe, creamos un nuevo registro
     await connection.query(
       `INSERT INTO tblsobrenosotros (quienesSomos, nuestraHistoria) VALUES (?, ?)`,
       [quienesSomos, nuestraHistoria]
@@ -87,18 +88,20 @@ routerSobreNosotros.put("/:id", csrfProtection, async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
-    
+
+   
     const [rowsCheck] = await connection.query(
       "SELECT id FROM tblsobrenosotros WHERE id = ?",
       [id]
     );
+
     if (rowsCheck.length === 0) {
       return res
         .status(404)
         .json({ error: "No se encontró la información de 'Sobre Nosotros'" });
     }
 
-   
+    
     await connection.query(
       `
         UPDATE tblsobrenosotros
