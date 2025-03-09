@@ -13,7 +13,7 @@ const otplib = require("otplib");
 const qrcode = require("qrcode");
 
 const { pool } = require("../connectBd");
-
+const { getIO } = require("../config/socket");
 const usuarioRouter = express.Router();
 usuarioRouter.use(express.json());
 usuarioRouter.use(cookieParser());
@@ -154,7 +154,12 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
     await connection.query(queryPerfil, [insertId]);
 
     await connection.commit();
-
+    const [usuarios] = await pool.query(`
+      SELECT COUNT(*) AS totalUsuarios
+      FROM tblusuarios;
+    `);
+    const totalUsuarios = usuarios[0].totalUsuarios;
+    getIO().emit("actualizacionUsuarios", { totalUsuarios });
     res.status(201).json({
       message: "Usuario creado exitosamente",
       userId: insertId,
@@ -470,17 +475,20 @@ const verifyToken = async (req, res, next) => {
 
 
   if (!token) {
+    getIO().emit("sessionExpired", { message: "No tienes token de acceso." });
     return res.status(403).json({ message: "No tienes token de acceso." });
   }
 
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
+
     const sessionQuery = `
       SELECT * FROM tblsesiones WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
     `;
     const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
 
     if (sessions.length === 0) {
+      getIO().emit("sessionExpired", { message: "Sesión inválida o expirada." });
       return res.status(401).json({
         message: "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
       });
@@ -490,8 +498,10 @@ const verifyToken = async (req, res, next) => {
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
+      getIO().emit("sessionExpired", { message: "El token ha expirado. Inicia sesión nuevamente." });
       return res.status(401).json({ message: "El token ha expirado. Inicia sesión nuevamente." });
     }
+    getIO().emit("sessionExpired", { message: "Error en la autenticación." });
     return res.status(500).json({ message: "Error en la autenticación." });
   }
 };
@@ -534,6 +544,7 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
     }
 
     const usuario = result[0];
+   
     res.json({
       message: "Perfil obtenido correctamente",
       user: {
@@ -1237,6 +1248,7 @@ usuarioRouter.get("/totalUsuarios", async (req, res, next) => {
  SELECT COUNT(*) AS totalUsuarios
 FROM tblusuarios;
     `);
+
     res.json(usuarios);
   } catch (error) {
     console.error("Error al obtener total de usarios:", error);

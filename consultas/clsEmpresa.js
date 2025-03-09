@@ -118,6 +118,37 @@ routerEmpresa.post("/actualizar", csrfProtection, async (req, res) => {
     }
   });
   
+//=============================ENPOIT DE SPINER
+
+ routerEmpresa.get("/logo", async (req, res) => {
+  try {
+
+    const [empresa] = await pool.query("SELECT logoUrl FROM tbldatosempresa LIMIT 1");
+    if (empresa.length === 0) {
+      return res.status(404).json({ message: "Datos de la empresa no encontrados." });
+    }
+    res.status(200).json(empresa[0]);
+  } catch (error) {
+    console.error("Error al obtener los datos de la empresa:", error);
+    res.status(500).json({ message: "Error al obtener los datos de la empresa." });
+  }
+});
+
+
+routerEmpresa.get("/redesociales", async (req, res) => {
+  try {
+
+    const [empresa] = await pool.query("SELECT redesSociales FROM tbldatosempresa  LIMIT 1");
+    if (empresa.length === 0) {
+      return res.status(404).json({ message: "Datos de la empresa no encontrados." });
+    }
+    res.status(200).json(empresa[0]);
+  } catch (error) {
+    console.error("Error al obtener las redes Sociales:", error);
+    res.status(500).json({ message: "Error al obtener las redes Sociales." });
+  }
+});
+
 
 
 

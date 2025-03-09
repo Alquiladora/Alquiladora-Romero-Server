@@ -26,47 +26,25 @@ produtosRouter.get("/products", async (req, res) => {
     s.nombre AS NombreSubCategoria,
     c.nombre AS NombreCategoria,
 
-   
     pr.precioAdquirido,
 
     u.nombre AS NombreUsuario,
     u.correo AS EmailUsuario,
-
-    b.idBodega,
-    b.nombre AS nombreBodega,
-
-   
+    GROUP_CONCAT(DISTINCT b.nombre ORDER BY b.nombre SEPARATOR ', ') AS BodegasProducto,
     COALESCE(
-      GROUP_CONCAT(DISTINCT f.urlFoto ORDER BY f.urlFoto SEPARATOR ','),
-      ''
+        GROUP_CONCAT(DISTINCT f.urlFoto ORDER BY f.urlFoto SEPARATOR ','), 
+        ''
     ) AS ImagenesProducto
-
 FROM tblproductos p
-LEFT JOIN tblprecio pr
-     
-       ON p.idProducto = pr.idProducto
-
-LEFT JOIN tblsubcategoria s 
-       ON p.idSubcategoria = s.idSubcategoria
-
-LEFT JOIN tblcategoria c 
-       ON s.idCategoria = c.idCategoria
-
-LEFT JOIN tblusuarios u 
-       ON p.idUsuarios = u.idUsuarios
-
-LEFT JOIN tblinventario i 
-       ON p.idProducto = i.idProducto
-
-LEFT JOIN tblbodegas b 
-       ON i.idBodega = b.idBodega
-
-LEFT JOIN tblfotosproductos f 
-       ON p.idProducto = f.idProducto
-
+LEFT JOIN tblprecio pr ON p.idProducto = pr.idProducto
+LEFT JOIN tblsubcategoria s ON p.idSubcategoria = s.idSubcategoria
+LEFT JOIN tblcategoria c ON s.idCategoria = c.idCategoria
+LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
+LEFT JOIN tblinventario i ON p.idProducto = i.idProducto
+LEFT JOIN tblbodegas b ON i.idBodega = b.idBodega
+LEFT JOIN tblfotosproductos f ON p.idProducto = f.idProducto
 GROUP BY p.idProducto
 ORDER BY p.idProducto DESC;
-
       `);
 
     res.status(200).json({ success: true, products: rows });
@@ -270,11 +248,10 @@ produtosRouter.post("/products", csrfProtection, async (req, res) => {
       color,
       material,
       idUsuarios,
-      idBodega,
     } = req.body;
 
     console.log(
-      "Campos recubidos",
+      "Campos recibidos:",
       nombre,
       detalles,
       idSubcategoria,
@@ -282,8 +259,7 @@ produtosRouter.post("/products", csrfProtection, async (req, res) => {
       imagenes,
       color,
       material,
-      idUsuarios,
-      idBodega
+      idUsuarios
     );
 
     if (
@@ -293,8 +269,7 @@ produtosRouter.post("/products", csrfProtection, async (req, res) => {
       (!foto && (!imagenes || imagenes.length === 0)) ||
       !color ||
       !material ||
-      !idUsuarios ||
-      !idBodega
+      !idUsuarios
     ) {
       return res.status(400).json({
         success: false,
@@ -307,12 +282,30 @@ produtosRouter.post("/products", csrfProtection, async (req, res) => {
     color = capitalizeFirstLetter(color);
     material = capitalizeFirstLetter(material);
 
+    
+    const [existingProducts] = await pool.query(
+      `SELECT COUNT(*) as count FROM tblproductos 
+       WHERE nombre = ? AND idSubcategoria = ?`,
+      [nombre, idSubcategoria]
+    );
+
+    if (existingProducts[0].count > 0) {
+    
+      return res.status(400).json(
+       {
+        success: false,
+        message: "Este producto ya está registrado en la misma categoría.",
+      });
+     
+    }
+
+
     const currentDateTime = moment()
       .tz("America/Mexico_City")
       .format("YYYY-MM-DD HH:mm:ss");
 
     const [result] = await pool.query(
-      `CALL InsertarProducto(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      `CALL InsertarProducto(?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         nombre,
         detalles,
@@ -323,7 +316,6 @@ produtosRouter.post("/products", csrfProtection, async (req, res) => {
         currentDateTime,
         currentDateTime,
         idUsuarios,
-        idBodega,
       ]
     );
     res.status(201).json({
@@ -355,6 +347,8 @@ produtosRouter.put("/products/:id", csrfProtection, async (req, res) => {
       imagenes,
       imagenesEliminar,
     } = req.body;
+    console.log("Iamgenes" ,imagenes)
+    console.log("Iamgenes eliminados" ,imagenesEliminar)
 
     console.log(
       "Dats recibidos de productos",
@@ -391,10 +385,11 @@ produtosRouter.put("/products/:id", csrfProtection, async (req, res) => {
     ]);
 
     if (imagenesEliminar && imagenesEliminar.length > 0) {
-      await pool.query("DELETE FROM tblfotosproductos WHERE idFoto IN (?)", [
+      await pool.query("DELETE FROM tblfotosproductos WHERE urlFoto IN (?)", [
         imagenesEliminar,
       ]);
     }
+    
 
     const [[{ total: totalActual }]] = await pool.query(
       "SELECT COUNT(*) as total FROM tblfotosproductos WHERE idProducto = ?",
@@ -579,6 +574,278 @@ GROUP BY p.idProducto;
       });
     }
   });
+
+
+  //===============================================COMPONENTES CATEGOSIAS -SUBCATEGORIAS ===================================================================
+  produtosRouter.get("/categorias", async (req, res) => {
+    try {
+      const [rows] = await pool.query("SELECT  idcategoria AS id , nombre, fechaCreacion FROM tblcategoria;");
+      res.status(200).json({
+        success: true,
+        categorias: rows,
+      });
+    } catch (error) {
+      console.error("Error al obtener categorías:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno del servidor",
+      });
+    }
+  });
+
+
+  //CRear 
+  // Endpoint para crear una nueva categoría
+produtosRouter.post("/categoria", csrfProtection, async (req, res) => {
+  try {
+    let { nombre } = req.body;
+    
+    if (!nombre || !nombre.trim() || nombre.trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: "El nombre de la categoría es requerido y debe tener al menos 3 caracteres."
+      });
+    }
+
+    // Capitalizar el primer carácter (opcional)
+    nombre = nombre.trim();
+    nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
+
+    const [existing] = await pool.query(
+      "SELECT COUNT(*) as count FROM tblcategoria WHERE LOWER(nombre) = ?",
+      [nombre.toLowerCase()]
+    );
+    if (existing[0].count > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "La categoría ya está registrada. Por favor, ingresa un nombre diferente."
+      });
+    }
+
+    const currentDateTime = moment()
+      .tz("America/Mexico_City")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    // Inserción en la tabla
+    const [result] = await pool.query(
+      "INSERT INTO tblcategoria (nombre, fechaCreacion) VALUES (?, ?)",
+      [nombre, currentDateTime]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Categoría creada correctamente.",
+      idCategoria: result.insertId
+    });
+  } catch (error) {
+    console.error("Error al crear categoría:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor."
+    });
+  }
+});
+
+
+// Endpoint para crear una nueva subcategoría
+produtosRouter.post("/subcategoria", csrfProtection, async (req, res) => {
+  try {
+    let { idCategoria, nombre } = req.body;
+
+    if (!idCategoria || !nombre || !nombre.trim()) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "El id de la categoría y el nombre de la subcategoría son requeridos.",
+      });
+    }
+    console.log("Id de categoria", idCategoria);
+    nombre = nombre.trim();
+    if (nombre.length < 3) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "El nombre de la subcategoría debe tener al menos 3 caracteres.",
+      });
+    }
+    const normalizedNombre =
+      nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
+
+    const [existing] = await pool.query(
+      "SELECT COUNT(*) as count FROM tblsubcategoria WHERE idCategoria = ? AND LOWER(nombre) = ?",
+      [idCategoria, normalizedNombre.toLowerCase()]
+    );
+    if (existing[0].count > 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "La subcategoría ya está registrada en esta categoría. Por favor, ingresa un nombre diferente.",
+      });
+    }
+
+    const currentDateTime = moment()
+      .tz("America/Mexico_City")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    // Inserción en la tabla tblsubcategoria
+    const [result] = await pool.query(
+      "INSERT INTO tblsubcategoria (idCategoria, nombre, fechaCreacion) VALUES (?, ?, ?)",
+      [idCategoria, normalizedNombre, currentDateTime]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Subcategoría creada correctamente.",
+      idSubcategoria: result.insertId,
+    });
+  } catch (error) {
+    console.error("Error al crear subcategoría:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor.",
+    });
+  }
+});
+
+//ACtualizacion 
+produtosRouter.put("/categoria/:id", csrfProtection, async (req, res) => {
+  try {
+    const { id } = req.params;
+    let { nombre } = req.body; 
+    console.log("Datsos recibidos de categroias", id, nombre)
+
+    if (!nombre || !nombre.trim() || nombre.trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: "El nombre es requerido y debe tener al menos 3 caracteres."
+      });
+    }
+
+    nombre = nombre.trim();
+    const normalizedNombre = nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
+    const [existing] = await pool.query(
+      "SELECT COUNT(*) AS count FROM tblcategoria WHERE LOWER(nombre) = ? AND idcategoria <> ?",
+      [normalizedNombre.toLowerCase(), id]
+    );
+    if (existing[0].count > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "La categoría ya está registrada. Por favor, ingresa un nombre diferente."
+      });
+    }
+    const [result] = await pool.query(
+      "UPDATE tblcategoria SET nombre = ? WHERE idcategoria = ?",
+      [normalizedNombre, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Categoría no encontrada" });
+    }
+
+    res.status(200).json({ success: true, message: "Categoría actualizada correctamente" });
+  } catch (error) {
+    console.error("Error al actualizar categoría:", error);
+    res.status(500).json({ success: false, message: "Error interno del servidor" });
+  }
+});
+
+
+produtosRouter.put("/subcategoria/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    let { nombre, idCategoria } = req.body;
+    console.log("Datos recibidos de subcategorias actualizar", id, nombre, idCategoria)
+   
+    if (!nombre || !nombre.trim() || nombre.trim().length < 3 || !idCategoria) {
+      return res.status(400).json({
+        success: false,
+        message: "El nombre (mínimo 3 caracteres) y el id de la categoría son requeridos."
+      });
+    }
+  
+    nombre = nombre.trim();
+    const normalizedNombre = nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
+    const [existing] = await pool.query(
+      "SELECT COUNT(*) AS count FROM tblsubcategoria WHERE LOWER(nombre) = ? AND idCategoria = ? AND idSubCategoria <> ?",
+      [normalizedNombre.toLowerCase(), idCategoria, id]
+    );
+    if (existing[0].count > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "La subcategoría ya está registrada en esta categoría. Por favor, ingresa un nombre diferente."
+      });
+    }
+  
+    const [result] = await pool.query(
+      "UPDATE tblsubcategoria SET nombre = ?, idCategoria = ? WHERE idSubCategoria = ?",
+      [normalizedNombre, idCategoria, id]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Subcategoría no encontrada"
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Subcategoría actualizada correctamente"
+    });
+  } catch (error) {
+    console.error("Error al actualizar subcategoría:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor"
+    });
+  }
+});
+
+
+
+//Elimina
+produtosRouter.delete("/categoria/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [result] = await pool.query(
+      "DELETE FROM tblcategoria WHERE idcategoria = ?",
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Categoría no encontrada" });
+    }
+
+    res.status(200).json({ success: true, message: "Categoría eliminada correctamente" });
+  } catch (error) {
+    console.error("Error al eliminar categoría:", error);
+    res.status(500).json({ success: false, message: "Error interno del servidor" });
+  }
+});
+
+
+produtosRouter.delete("/subcategoria/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [result] = await pool.query(
+      "DELETE FROM tblsubcategoria WHERE idSubCategoria = ?",
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Subcategoría no encontrada" });
+    }
+
+    res.status(200).json({ success: true, message: "Subcategoría eliminada correctamente" });
+  } catch (error) {
+    console.error("Error al eliminar subcategoría:", error);
+    res.status(500).json({ success: false, message: "Error interno del servidor" });
+  }
+});
+
+
 
 module.exports = produtosRouter;
 

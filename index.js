@@ -3,6 +3,8 @@ const express = require('express');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const cors = require("cors");
+const http = require('http');
+const { init: initSocket } = require('./config/socket');
 //=====================RUTAS==========================
 const routers = require('./rutas');
 const connect = require('./connectBd');
@@ -65,8 +67,19 @@ app.use((err, req, res, next) => {
 
 
 
+const server = http.createServer(app);
+
+const io = initSocket(server);
 
 
-app.listen(port, () => {
-  console.log(`🚀Servidor en http://localhost:${port}`);
+
+server.listen(port, () => {
+  console.log(`🚀 Servidor en http://localhost:${port}`);
 });
+
+
+module.exports = {
+  app,
+  server,
+  io
+};
