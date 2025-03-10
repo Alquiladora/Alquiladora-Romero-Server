@@ -512,7 +512,7 @@ const verifyToken = async (req, res, next) => {
 usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
   const userId = req.user.id;
   try {
-    //Hacemos la consulat de la pool
+    
     const query = `
     SELECT 
       u.nombre, 
@@ -785,7 +785,7 @@ usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
     if (updateResult.affectedRows === 0) {
       return res.status(404).json({ message: "Usuario no encontrado." });
     }
-
+    getIO().emit("actualizacionPerfil", { userId, tipo: "fotoPerfil", fotoPerfil });
     res.json({
       message: "Foto de perfil actualizada correctamente.",
       fotoPerfil,
@@ -839,7 +839,8 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
       `;
       const [result] = await connection.query(queryPerfil, [value, id]);
       console.log("Resulltado de fecha n", result);
-
+  
+    
       if (result.affectedRows === 0) {
         await connection.rollback();
         return res
@@ -857,6 +858,7 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
     }
 
     await connection.commit();
+    getIO().emit("actualizacionPerfil", { userId: id, campo: field, value });
     res.json({
       message: `${field} actualizado correctamente`,
       updatedField: value,

@@ -17,6 +17,8 @@ const  ClsSobreNosotros= require("./consultas/clsSobreNosotros")
 const ClsPrecios = require("./consultas/clsPrecios")
 const ClsBodegas = require("./consultas/clsBodegas")
 const ClsInventario = require("./consultas/clsInventario")
+const ClsDirrecion= require("./consultas/clsDireccion")
+
 
 router.get('/get-csrf-token',csrfProtection , (req, res) => {
     res.json({ csrfToken: req.csrfToken() });
@@ -47,6 +49,7 @@ router.use('/sobrenosotros',ClsSobreNosotros);
 router.use('/precios',ClsPrecios);
 router.use('/bodegas',ClsBodegas);
 router.use('/inventario', ClsInventario);
+router.use('/direccion', ClsDirrecion);
 
 
 
