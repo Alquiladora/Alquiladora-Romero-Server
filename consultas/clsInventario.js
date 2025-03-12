@@ -17,50 +17,105 @@ routerInventario.use(cookieParser());
 
 routerInventario.get("/", csrfProtection, async (req, res) => {
   const sql = `
-   SELECT 
-    p.idProducto,
-    p.nombre,
-    p.detalles,
-    p.color,
-    p.material,
-    sub.idSubCategoria,
-    sub.nombre AS nombreSubcategoria,
-    categ.idcategoria,
-    categ.nombre AS nombreCategoria,
-    usua.idUsuarios,
-    usua.correo,
-    pre.idPrecio,
-    pre.precioAlquiler,
-    bod.idBodega,
-    bod.nombre AS nombreBodega,
-    bod.es_principal,
-    bod.ubicacion,
-    inv.idInventario,
-    inv.stockReal,
-    inv.stock,
-    inv.stockReservado,
-    inv.estado,
-    inv.notas,
-    inv.fechaRegistro,
+   SELECT
+  p.idProducto,
+  p.nombre,
+  p.detalles,
+  p.material,
+  
+  sub.idSubCategoria,
+  sub.nombre AS nombreSubcategoria,
+  
+  categ.idcategoria,
+  categ.nombre AS nombreCategoria,
+  
+  usua.idUsuarios,
+  usua.correo,
+  
+  pre.idPrecio,
+  pre.precioAlquiler,
+  
+  bod.idBodega,
+  bod.nombre AS nombreBodega,
+  bod.es_principal,
+  bod.ubicacion,
+  
+  inv.idInventario,
+  inv.stockReal,
+  inv.stock,
+  inv.stockReservado,
+  inv.estado,
+  inv.notas,
+  inv.fechaRegistro,
+
+ 
+  MIN(
     (
       SELECT fp.urlFoto 
       FROM tblfotosproductos fp
       WHERE fp.idProducto = p.idProducto
       LIMIT 1
-    ) AS urlFoto
+    )
+  ) AS urlFoto,
+
+ 
+  GROUP_CONCAT(DISTINCT c.color SEPARATOR ', ') AS colores
+
 FROM tblinventario inv
-    LEFT JOIN tblproductos p 
-        ON inv.idProducto = p.idProducto
-    LEFT JOIN tblsubcategoria sub 
-        ON p.idSubcategoria = sub.idSubCategoria
-    LEFT JOIN tblcategoria categ
-        ON sub.idCategoria = categ.idcategoria
-    LEFT JOIN tblusuarios usua
-        ON p.idUsuarios = usua.idUsuarios
-    LEFT JOIN tblprecio pre
-        ON p.idProducto = pre.idProducto
-    LEFT JOIN tblbodegas bod
-        ON inv.idBodega = bod.idBodega;
+
+
+LEFT JOIN tblproductoscolores pc
+       ON inv.idProductoColor = pc.idProductoColores
+
+LEFT JOIN tblproductos p
+       ON pc.idProducto = p.idProducto
+
+
+LEFT JOIN tblsubcategoria sub
+       ON p.idSubcategoria = sub.idSubCategoria
+
+LEFT JOIN tblcategoria categ
+       ON sub.idCategoria = categ.idcategoria
+
+LEFT JOIN tblusuarios usua
+       ON p.idUsuarios = usua.idUsuarios
+
+LEFT JOIN tblprecio pre
+       ON p.idProducto = pre.idProducto
+
+LEFT JOIN tblbodegas bod
+       ON inv.idBodega = bod.idBodega
+
+
+LEFT JOIN tblcolores c
+       ON pc.idColor = c.idColores
+
+
+GROUP BY
+  p.idProducto,
+  p.nombre,
+  p.detalles,
+  p.material,
+  sub.idSubCategoria,
+  sub.nombre,
+  categ.idcategoria,
+  categ.nombre,
+  usua.idUsuarios,
+  usua.correo,
+  pre.idPrecio,
+  pre.precioAlquiler,
+  bod.idBodega,
+  bod.nombre,
+  bod.es_principal,
+  bod.ubicacion,
+  inv.idInventario,
+  inv.stockReal,
+  inv.stock,
+  inv.stockReservado,
+  inv.estado,
+  inv.notas,
+  inv.fechaRegistro;
+
 
     `;
 
