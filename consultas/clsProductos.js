@@ -497,33 +497,37 @@ produtosRouter.get("/categoria/:nombreCategoria", async (req, res) => {
 
   try {
     const sql = `
-    SELECT 
-    p.idProducto,
-    p.nombre AS nombreProducto,
-    p.detalles,
-    p.idSubCategoria,
-    p.color,
-    p.material,
-    sc.idSubCategoria AS subCategoriaID,
-    sc.nombre AS nombreSubcategoria,
-    c.idCategoria AS categoriaID,
-    c.nombre AS nombreCategoria,
-    pr.precioAlquiler, 
-    SUM(i.stock) AS stock,
-    GROUP_CONCAT(DISTINCT f.urlFoto) AS imagenes
-FROM tblproductos p
-JOIN tblsubcategoria sc 
-  ON p.idSubCategoria = sc.idSubCategoria
-JOIN tblcategoria c 
-  ON sc.idCategoria = c.idCategoria
-LEFT JOIN tblprecio pr
-  ON p.idProducto = pr.idProducto
-LEFT JOIN tblinventario i
-  ON p.idProducto = i.idProducto
-LEFT JOIN tblfotosproductos f
-  ON p.idProducto = f.idProducto
-WHERE LOWER(c.nombre) = LOWER(?)
-GROUP BY p.idProducto;
+     SELECT 
+        p.idProducto,
+        p.nombre AS nombreProducto,
+        p.detalles,
+        p.idSubCategoria,
+        p.material,
+        sc.idSubCategoria AS subCategoriaID,
+        sc.nombre AS nombreSubcategoria,
+        c.idCategoria AS categoriaID,
+        c.nombre AS nombreCategoria,
+        pr.precioAlquiler, 
+        SUM(i.stock) AS stock,
+        GROUP_CONCAT(DISTINCT f.urlFoto) AS imagenes
+      FROM tblproductos p
+      JOIN tblsubcategoria sc 
+        ON p.idSubCategoria = sc.idSubCategoria
+      JOIN tblcategoria c 
+        ON sc.idCategoria = c.idCategoria
+      LEFT JOIN tblprecio pr
+        ON p.idProducto = pr.idProducto
+      LEFT JOIN tblproductoscolores pc 
+        ON p.idProducto = pc.idProducto
+      LEFT JOIN tblcolores col 
+        ON pc.idColor = col.idColores
+      LEFT JOIN tblinventario i 
+        ON pc.idProductoColores = i.idProductoColor
+      LEFT JOIN tblfotosproductos f
+        ON p.idProducto = f.idProducto
+      WHERE LOWER(c.nombre) = LOWER(?)
+      GROUP BY p.idProducto;
+
       `;
 
     const [rows] = await pool.query(sql, [nombreCategoria]);

@@ -133,9 +133,10 @@ routerInventario.put(
   csrfProtection,
   async (req, res) => {
     const { idInventario } = req.params;
-    const { stock } = req.body;
+    const { stock, allowZero } = req.body;
     const stockToAdd = parseInt(stock, 10);
-    if (isNaN(stockToAdd) || stockToAdd <= 0) {
+
+    if (isNaN(stockToAdd) || (!allowZero && stockToAdd <= 0) || (allowZero && stockToAdd < 0)) {
       return res.status(400).json({
         success: false,
         message: "El valor de 'stock' debe ser un número mayor que 0.",
@@ -157,9 +158,9 @@ routerInventario.put(
       const { stockReal, stock: currentStock } = rows[0];
       const updatedStockReal =
         stockReal === 0 ? stockToAdd : stockReal + stockToAdd;
-
       const updatedStock =
         currentStock === 0 ? stockToAdd : currentStock + stockToAdd;
+
       await pool.query(
         "UPDATE tblinventario SET stockReal = ?, stock = ? WHERE idInventario = ?",
         [updatedStockReal, updatedStock, idInventario]
@@ -182,6 +183,7 @@ routerInventario.put(
     }
   }
 );
+
 
 routerInventario.get("/bodegas", async (req, res) => {
   try {
