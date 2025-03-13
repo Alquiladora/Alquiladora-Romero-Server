@@ -151,6 +151,23 @@ routerEmpresa.get("/redesociales", async (req, res) => {
 
 
 
+routerEmpresa.get("/sobreNosotros", async (req, res) => {
+  try {
+
+    const [empresa] = await pool.query("SELECT *FROM tblsobrenosotros LIMIT 1");
+    if (empresa.length === 0) {
+      return res.status(404).json({ message: "Datos de la empresa no encontrados." });
+    }
+    res.status(200).json(empresa[0]);
+  } catch (error) {
+    console.error("Error al obtener los datos de la empresa:", error);
+    res.status(500).json({ message: "Error al obtener los datos de la empresa." });
+  }
+});
+
+
+
+
 
 
 module.exports=routerEmpresa;

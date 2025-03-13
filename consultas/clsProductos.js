@@ -215,37 +215,37 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
       const sql = `
         SELECT
           p.idProducto,
-          p.nombre            AS nombreProducto,
+          p.nombre AS nombreProducto,
           p.detalles,
+          p.fechaCreacion,
           p.idSubCategoria,
           p.material,
-          sc.nombre           AS nombreSubcategoria,
+          sc.nombre AS nombreSubcategoria,
           c.idCategoria,
-          c.nombre           AS nombreCategoria,
+          c.nombre AS nombreCategoria,
           pr.precioAlquiler,
           COALESCE(SUM(i.stock), 0) AS stock,
-          GROUP_CONCAT(DISTINCT col.color ORDER BY col.color SEPARATOR ', ') AS colores,
+          col.color AS nombreColor,
           GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
-      FROM tblproductos p
-      JOIN tblsubcategoria sc 
+        FROM tblproductos p
+        JOIN tblsubcategoria sc 
           ON p.idSubCategoria = sc.idSubCategoria
-      JOIN tblcategoria c
+        JOIN tblcategoria c 
           ON sc.idCategoria = c.idCategoria
-      LEFT JOIN tblprecio pr
+        LEFT JOIN tblprecio pr 
           ON p.idProducto = pr.idProducto
-      LEFT JOIN tblfotosproductos f
-          ON p.idProducto = f.idProducto
-      LEFT JOIN tblinventario i
-          ON p.idProducto = i.idProductoColor
-      LEFT JOIN tblproductoscolores pc
+        LEFT JOIN tblproductoscolores pc 
           ON p.idProducto = pc.idProducto
-      LEFT JOIN tblcolores col
+        LEFT JOIN tblcolores col 
           ON pc.idColor = col.idColores
-      WHERE p.idProducto = ?
-      GROUP BY p.idProducto;
-      
+        LEFT JOIN tblinventario i 
+          ON pc.idProductoColores = i.idProductoColor
+        LEFT JOIN tblfotosproductos f 
+          ON p.idProducto = f.idProducto
+        WHERE p.idProducto = ?
+        GROUP BY p.idProducto, col.idColores;
       `;
-  
+      
       const [rows] = await pool.query(sql, [id]);
       if (!rows || rows.length === 0) {
         return res.status(404).json({
@@ -253,9 +253,30 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
           message: "Producto no encontrado"
         });
       }
+      
+    
+      const product = {
+        idProducto: rows[0].idProducto,
+        nombreProducto: rows[0].nombreProducto,
+        fechaCreacion: rows[0].fechaCreacion,
+        detalles: rows[0].detalles,
+        idSubCategoria: rows[0].idSubCategoria,
+        material: rows[0].material,
+        nombreSubcategoria: rows[0].nombreSubcategoria,
+        idCategoria: rows[0].idCategoria,
+        nombreCategoria: rows[0].nombreCategoria,
+        precioAlquiler: rows[0].precioAlquiler,
+        
+        imagenes: rows[0].imagenes,
+        variantes: rows.map(row => ({
+          nombreColor: row.nombreColor,
+          stock: row.stock
+        }))
+      };
+      
       res.status(200).json({
         success: true,
-        product: rows[0]
+        product
       });
     } catch (error) {
       console.error("Error al obtener el producto:", error);
@@ -265,7 +286,7 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
       });
     }
   });
-
+  
 
 
 
@@ -288,6 +309,7 @@ produtosRouter.post("/products", csrfProtection, async (req, res) => {
       material,
       idUsuarios,
     } = req.body;
+    console.log("Datos de usuario", idUsuarios)
 
    
 
@@ -497,18 +519,19 @@ produtosRouter.get("/categoria/:nombreCategoria", async (req, res) => {
 
   try {
     const sql = `
-     SELECT 
+         SELECT 
         p.idProducto,
         p.nombre AS nombreProducto,
+        p.fechaCreacion,
         p.detalles,
-        p.idSubCategoria,
-        p.material,
-        sc.idSubCategoria AS subCategoriaID,
+        sc.idSubCategoria,
         sc.nombre AS nombreSubcategoria,
-        c.idCategoria AS categoriaID,
+        c.idCategoria ,
         c.nombre AS nombreCategoria,
-        pr.precioAlquiler, 
+        pr.precioAlquiler,
+        col.color AS nombreColor,
         SUM(i.stock) AS stock,
+        i.estado AS estadoProducto,
         GROUP_CONCAT(DISTINCT f.urlFoto) AS imagenes
       FROM tblproductos p
       JOIN tblsubcategoria sc 
@@ -526,7 +549,10 @@ produtosRouter.get("/categoria/:nombreCategoria", async (req, res) => {
       LEFT JOIN tblfotosproductos f
         ON p.idProducto = f.idProducto
       WHERE LOWER(c.nombre) = LOWER(?)
-      GROUP BY p.idProducto;
+      GROUP BY p.idProducto, col.idColores;
+
+      
+      
 
       `;
 
@@ -553,26 +579,33 @@ produtosRouter.get("/productosRelacionado/:idSubCategoria", async (req, res) => 
     const { idSubCategoria } = req.params;
     try {
       const sql = `
-        SELECT 
+             SELECT 
     p.idProducto,
-    p.nombre,
-    p.detalles,
-    p.idSubCategoria,
-    p.color,
-    p.material,
+    p.nombre AS nombreProducto,
     p.fechaCreacion,
-    p.fechaActualizacion,
+    p.detalles,
+    sc.idSubCategoria,
     sc.nombre AS nombreSubcategoria,
-   
+    pr.precioAlquiler,
+    col.color AS nombreColor,
+    SUM(i.stock) AS stock,
+    i.estado AS estadoProducto,
     GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
-FROM tblproductos p
-JOIN tblsubcategoria sc 
+  FROM tblproductos p
+  JOIN tblsubcategoria sc 
     ON p.idSubCategoria = sc.idSubCategoria
--- Incluye las fotos
-LEFT JOIN tblfotosproductos f
+  LEFT JOIN tblprecio pr
+    ON p.idProducto = pr.idProducto
+  LEFT JOIN tblproductoscolores pc 
+    ON p.idProducto = pc.idProducto
+  LEFT JOIN tblcolores col 
+    ON pc.idColor = col.idColores
+  LEFT JOIN tblinventario i 
+    ON pc.idProductoColores = i.idProductoColor
+  LEFT JOIN tblfotosproductos f
     ON p.idProducto = f.idProducto
-WHERE sc.idSubCategoria = ?
-GROUP BY p.idProducto;
+  WHERE sc.idSubCategoria =  ?
+  GROUP BY p.idProducto, col.idColores;
       `;
      
       const [rows] = await pool.query(sql, [idSubCategoria]);
@@ -868,6 +901,41 @@ produtosRouter.delete("/subcategoria/:id", async (req, res) => {
 });
 
 
+
+//Seleccionar categorias en la parte publica
+produtosRouter.get("/categrias/disponibles", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+         SELECT
+  c.idCategoria,
+  c.nombre AS nombreCategoria,
+  (
+    SELECT f.urlFoto
+    FROM tblfotosproductos AS f
+    JOIN tblproductos AS p2 ON p2.idProducto = f.idProducto
+    JOIN tblsubcategoria AS sc2 ON sc2.idSubCategoria = p2.idSubCategoria
+    WHERE sc2.idCategoria = c.idCategoria
+    ORDER BY RAND()
+    LIMIT 1
+  ) AS fotoAleatoria
+FROM tblcategoria AS c
+WHERE EXISTS (
+  SELECT 1
+  FROM tblsubcategoria AS sc
+  JOIN tblproductos AS p ON p.idSubCategoria = sc.idSubCategoria
+  WHERE sc.idCategoria = c.idCategoria
+);
+        `);
+
+    res.status(200).json({ success: true, categorias: rows });
+  } catch (error) {
+    console.error("Error al obtener las categorias", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+    });
+  }
+});
 
 
 produtosRouter.get("/pedidos-manual", csrfProtection, async (req, res) => {
