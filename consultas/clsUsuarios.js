@@ -8,7 +8,7 @@ const winston = require("winston");
 const crypto = require("crypto");
 const { csrfProtection } = require("../config/csrf");
 const moment = require("moment-timezone");
-
+const cron = require("node-cron");
 const otplib = require("otplib");
 const qrcode = require("qrcode");
 
@@ -102,67 +102,86 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+
     if (!password) {
       return res.status(400).json({ message: "La contraseña es obligatoria" });
     }
 
-    const capitalizeFirstLetter = (str) => {
-      return str
-        ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
-        : "";
-    };
+    const capitalizeFirstLetter = (str) => str?.charAt(0).toUpperCase() + str.slice(1).toLowerCase() || "";
+
     const nombreFormateado = capitalizeFirstLetter(nombre);
     const apellidoPFormateado = capitalizeFirstLetter(apellidoP);
     const apellidoMFormateado = capitalizeFirstLetter(apellidoM);
 
     const hashedPassword = await argon2.hash(password);
-
     const fechaCreacion = obtenerFechaMexico();
 
-    const query = `
+    
+    const [noCliente] = await connection.query(
+      `SELECT idNoClientes FROM tblnoclientes WHERE correo = ? OR telefono = ? LIMIT 1`,
+      [correo, telefono]
+    );
+
+    if (!noCliente.length) {
+      console.log("Cliente no encontrado en tblnoclientes")
+      return res.status(404).json({ message: "Cliente no encontrado en tblnoclientes" });
+    }
+
+    console.log("Estos datos son de idNoclientes", noCliente[0].idNoClientes)
+
+    const insertUserQuery = `
       INSERT INTO tblusuarios 
       (nombre, apellidoP, apellidoM, correo, telefono, password, rol, estado, multifaltor, fechaCreacion) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-
-    const [result] = await connection.query(query, [
-      nombreFormateado,
-      apellidoPFormateado,
-      apellidoMFormateado,
-      correo,
-      telefono,
-      hashedPassword,
-      "cliente",
-      1,
-      null,
-      fechaCreacion,
+    const [result] = await connection.query(insertUserQuery, [
+      nombreFormateado, apellidoPFormateado, apellidoMFormateado, correo, telefono,
+      hashedPassword, "cliente", 1, null, fechaCreacion
     ]);
-
-    // Manejo de `insertId` dependiendo de la estructura de `result`
     const insertId = result.insertId;
-    console.log("Obtenemos el insertId del usuario", insertId);
 
     if (!insertId) {
       await connection.rollback();
       return res.status(500).json({ message: "Error al registrar usuario" });
     }
+  
+    
+    if (noCliente.length > 0) {
+      
+      const [pedidos] = await connection.query(
+        `SELECT idDireccion FROM tblpedidos 
+         WHERE idNoClientes = ? 
+         AND LOWER(estado) IN ('finalizado', 'cancelado')`,
+        [noCliente[0].idNoClientes]
+      );
+      console.log("valor de idDireccion", pedidos)
 
-    const queryPerfil = `
-      INSERT INTO tblperfilusuarios (idUsuarios, fotoPerfil)
-      VALUES (?, NULL)
-    `;
+      if (pedidos.length > 0) {
+        await connection.query(`DELETE FROM tbldireccioncliente WHERE idNoClientes = ?`, [noCliente[0].idNoClientes]);
+      }
+
+      await connection.query(`UPDATE tblnoclientes SET idUsuario = ? WHERE idNoClientes = ?`, [insertId, noCliente[0].idNoClientes]);
+
+      await connection.query(
+        `UPDATE tblnoclientes SET idUsuario = ?, nombre = NULL, apellidoCompleto = NULL, correo = NULL, telefono = NULL 
+        WHERE idNoClientes = ?`,
+        [insertId, noCliente[0].idNoClientes]
+      );
+    }
+
+    const queryPerfil = `INSERT INTO tblperfilusuarios (idUsuarios, fotoPerfil) VALUES (?, NULL)`;
     await connection.query(queryPerfil, [insertId]);
 
     await connection.commit();
-    const [usuarios] = await pool.query(`
-      SELECT COUNT(*) AS totalUsuarios
-      FROM tblusuarios;
-    `);
+
+    
+    const [usuarios] = await pool.query(`SELECT COUNT(*) AS totalUsuarios FROM tblusuarios`);
     const totalUsuarios = usuarios[0].totalUsuarios;
     getIO().emit("actualizacionUsuarios", { totalUsuarios });
+
     res.status(201).json({
       message: "Usuario creado exitosamente",
-      userId: insertId,
+      userId: insertId
     });
   } catch (error) {
     console.error("Error en el registro:", error);
@@ -172,6 +191,7 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
     if (connection) connection.release();
   }
 });
+
 //=====================CONSULTA DE USUARIOS===============================
 //Obtenemos Todos Los Usuarios
 usuarioRouter.get("/", async (req, res, next) => {
@@ -1090,7 +1110,7 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
       }
     }
 
-    // Hashear la nueva contraseña
+
     const hashedPassword = await argon2.hash(newPassword);
 
 
@@ -1256,6 +1276,57 @@ FROM tblusuarios;
     console.error("Error al obtener total de usarios:", error);
     res.status(500).json({ message: "Error al obtener total de usarios." });
   }
+});
+
+
+
+//=========================================CRONS-JOBS=================================================
+async function verificarYLimpiarNoClientes() {
+  let connection;
+
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    // 1. Obtener todos los "no clientes" que ahora son clientes
+    const [noClientes] = await connection.query(`
+      SELECT n.idNoClientes, n.correo, n.telefono, u.idUsuarios
+      FROM tblnoclientes n
+      INNER JOIN tblusuarios u ON n.correo = u.correo OR n.telefono = u.telefono
+      WHERE u.rol = 'cliente'
+    `);
+
+    // 2. Procesar cada "no cliente"
+    for (const noCliente of noClientes) {
+      // Verificar si hay pedidos activos
+      const [pedidos] = await connection.query(
+        `SELECT idDireccion FROM tblpedidos WHERE idNoClientes = ? AND estado IN ('finalizado', 'Finalizado', 'cancelado', 'Cancelado')`,
+        [noCliente.idNoClientes]
+      );
+
+      // Si no hay pedidos activos, eliminar registros
+      if (pedidos.length === 0) {
+        await connection.query(`DELETE FROM tbldireccioncliente WHERE idNoClientes = ?`, [noCliente.idNoClientes]);
+        await connection.query(`DELETE FROM tblnoclientes WHERE idNoClientes = ?`, [noCliente.idNoClientes]);
+        console.log(`Registros eliminados para el no cliente con ID: ${noCliente.idNoClientes}`);
+      }
+    }
+
+    await connection.commit();
+  } catch (error) {
+    console.error("Error en la verificación y limpieza de no clientes:", error);
+    if (connection) await connection.rollback();
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+
+
+cron.schedule("0 0 1 */6 *", async () => {
+  console.log("Ejecutando verificación y limpieza de no clientes...");
+  await verificarYLimpiarNoClientes();
+  console.log("Verificación y limpieza completada.");
 });
 
 

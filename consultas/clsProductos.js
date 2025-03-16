@@ -942,11 +942,13 @@ produtosRouter.get("/pedidos-manual", csrfProtection, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `
-         SELECT
+        SELECT
     p.idProducto,
     p.nombre,
     p.detalles,
-    col.color AS color,         
+     pc.idProductoColores, 
+    col.color AS color, 
+          
     p.material,
     sub.idSubCategoria,
     sub.nombre AS nombreSubcategoria,
@@ -985,6 +987,7 @@ FROM tblinventario inv
 
   LEFT JOIN tblbodegas bod
     ON inv.idBodega = bod.idBodega;
+
 
       `
     );

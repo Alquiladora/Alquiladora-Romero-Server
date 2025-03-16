@@ -17,7 +17,7 @@ routerInventario.use(cookieParser());
 
 routerInventario.get("/", csrfProtection, async (req, res) => {
   const sql = `
-   SELECT
+     SELECT
   p.idProducto,
   p.nombre,
   p.detalles,
@@ -34,21 +34,18 @@ routerInventario.get("/", csrfProtection, async (req, res) => {
   
   pre.idPrecio,
   pre.precioAlquiler,
-  
   bod.idBodega,
   bod.nombre AS nombreBodega,
   bod.es_principal,
   bod.ubicacion,
-  
   inv.idInventario,
+  inv.idProductoColor,
   inv.stockReal,
   inv.stock,
   inv.stockReservado,
   inv.estado,
   inv.notas,
   inv.fechaRegistro,
-
- 
   MIN(
     (
       SELECT fp.urlFoto 
@@ -57,40 +54,24 @@ routerInventario.get("/", csrfProtection, async (req, res) => {
       LIMIT 1
     )
   ) AS urlFoto,
-
- 
   GROUP_CONCAT(DISTINCT c.color SEPARATOR ', ') AS colores
-
 FROM tblinventario inv
-
-
 LEFT JOIN tblproductoscolores pc
        ON inv.idProductoColor = pc.idProductoColores
-
 LEFT JOIN tblproductos p
        ON pc.idProducto = p.idProducto
-
-
 LEFT JOIN tblsubcategoria sub
        ON p.idSubcategoria = sub.idSubCategoria
-
 LEFT JOIN tblcategoria categ
        ON sub.idCategoria = categ.idcategoria
-
 LEFT JOIN tblusuarios usua
        ON p.idUsuarios = usua.idUsuarios
-
 LEFT JOIN tblprecio pre
        ON p.idProducto = pre.idProducto
-
 LEFT JOIN tblbodegas bod
        ON inv.idBodega = bod.idBodega
-
-
 LEFT JOIN tblcolores c
        ON pc.idColor = c.idColores
-
-
 GROUP BY
   p.idProducto,
   p.nombre,
@@ -115,8 +96,6 @@ GROUP BY
   inv.estado,
   inv.notas,
   inv.fechaRegistro;
-
-
     `;
 
   try {
@@ -202,79 +181,101 @@ SELECT  idBodega,nombre,es_principal,estado FROM tblbodegas;
 
 
 routerInventario.post("/agregar-subbodega", csrfProtection, async (req, res) => {
-    try {
-      const {
-        idProducto,
-        idBodega,
-        stockReal,
-        stock,
-        stockReservado
-      } = req.body;
-  
-    
-      if (
-        !idProducto ||
-        !idBodega ||
-        stockReal === undefined ||
-        stock === undefined ||
-        stockReservado === undefined
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Todos los campos son obligatorios."
-        });
-      }
+  try {
+    const {
+      idProducto,
+      idBodega,
+      stockReal,
+      stock,
+      stockReservado,
+      coloresSeleccionados,
+    } = req.body;
 
+    console.log("Este recibe de id colores inventario", coloresSeleccionados)
+
+   
+    if (
+      !idProducto ||
+      !idBodega ||
+      stockReal === undefined ||
+      stock === undefined ||
+      stockReservado === undefined ||
+      !Array.isArray(coloresSeleccionados) ||
+      coloresSeleccionados.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Faltan campos obligatorios o no se seleccionó ningún color.",
+      });
+    }
+
+  
+    await pool.query("START TRANSACTION");
+
+    const estado = "activo";
+    const notas = "Registro subbodega";
+    const currentDateTime = moment()
+      .tz("America/Mexico_City")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+   
+    for (const idProdColor of coloresSeleccionados) {
+     
       const checkSql = `
-        SELECT 1 
+        SELECT 1
         FROM tblinventario
-        WHERE idBodega = ? AND idProducto = ?
+        WHERE idBodega = ?
+          AND idProductoColor = ?
         LIMIT 1
       `;
-      const [existe] = await pool.query(checkSql, [idBodega, idProducto]);
+      const [existe] = await pool.query(checkSql, [idBodega, idProdColor]);
+
+      console.log("Este recibe de existe", existe)
       if (existe.length > 0) {
+        
+        await pool.query("ROLLBACK");
         return res.status(400).json({
           success: false,
-          message: "El producto ya existe en esa bodega."
+          message: `El color de ese producto ya existe en esa bodega.`,
         });
       }
 
-      const estado = "activo";
-      const notas = "Registro subbodega";
-       const currentDateTime = moment()
-            .tz("America/Mexico_City")
-            .format("YYYY-MM-DD HH:mm:ss");
-     
-      const sql = `
+      const insertSql = `
         INSERT INTO tblinventario
-        (idBodega, idProducto, stockReal, stock, stockReservado, estado, notas, fechaRegistro)
-        VALUES (?, ?, ?, ?, ?, ?, ?,?)
+          (idProductoColor, idBodega, stockReal, stock, stockReservado, estado, notas, fechaRegistro)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?)
       `;
-  
-      // Ejecutamos la inserción
-      await pool.query(sql, [
+      await pool.query(insertSql, [
+        idProdColor,
         idBodega,
-        idProducto,
         stockReal,
         stock,
         stockReservado,
         estado,
         notas,
-        currentDateTime
+        currentDateTime,
       ]);
-  
-      return res.json({
-        success: true,
-        message: "Producto agregado correctamente a la bodega secundaria."
-      });
-    } catch (error) {
-      console.error("Error al insertar producto en subbodega:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Error al insertar producto en subbodega."
-      });
     }
-  });
+
+ 
+    await pool.query("COMMIT");
+
+    return res.json({
+      success: true,
+      message: "Producto(s) agregado(s) correctamente a la bodega secundaria.",
+    });
+  } catch (error) {
+   
+    await pool.query("ROLLBACK");
+    console.error("Error al insertar producto(s) en subbodega:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al insertar producto(s) en subbodega.",
+    });
+  }
+});
+;
   
 
 module.exports = routerInventario;

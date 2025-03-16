@@ -82,7 +82,7 @@ routerDireccion.get("/listar", csrfProtection, async (req, res) => {
         });
       }
   
-      // Validar teléfono (10 dígitos)
+
       const telefonoString = String(telefono).trim();
       if (!/^\d{10}$/.test(telefonoString)) {
         return res.status(400).json({
@@ -90,7 +90,7 @@ routerDireccion.get("/listar", csrfProtection, async (req, res) => {
         });
       }
   
-      // Capitalizar campos
+   
       const nombreCap = capitalize(nombre.trim());
       const apellidoCap = capitalize(apellido.trim());
       const paisCap = capitalize(pais.trim());
@@ -150,7 +150,7 @@ routerDireccion.get("/listar", csrfProtection, async (req, res) => {
                   .tz("America/Mexico_City")
                   .format("YYYY-MM-DD HH:mm:ss");
   
-      // Insertar la nueva dirección
+      
       const insertQuery = `
         INSERT INTO tbldireccioncliente (
           idUsuario,
@@ -192,8 +192,6 @@ routerDireccion.get("/listar", csrfProtection, async (req, res) => {
           .status(500)
           .json({ message: "No se pudo crear la dirección." });
       }
-  
-      // Emitir evento de socket si lo deseas
       getIO().emit("direccionCreada", {
         idDireccion: result.insertId,
         idUsuario,
