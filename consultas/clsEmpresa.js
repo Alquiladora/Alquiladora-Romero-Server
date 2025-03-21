@@ -17,18 +17,28 @@ routerEmpresa.use(cookieParser());
 //=====================================================================
 // Crear un endpoint para obtener los datos de la empresa
 routerEmpresa.get("/", async (req, res) => {
-    try {
-      const [empresa] = await pool.query("SELECT * FROM tbldatosempresa"); 
-      if (empresa.length === 0) {
-        return res.status(404).json({ message: "Datos de la empresa no encontrados." });
-      }
-      res.status(200).json(empresa[0]);
-    } catch (error) {
-      console.error("Error al obtener los datos de la empresa:", error);
+  try {
+   
+    const [empresa] = await pool.query("SELECT * FROM tbldatosempresa");
+
+    if (empresa.length === 0) {
+      return res.status(404).json({ message: "Datos de la empresa no encontrados." });
+    }
+
+    res.status(200).json(empresa[0]);
+  } catch (error) {
+   
+    console.error("Error al obtener los datos de la empresa:", error);
+
+    
+    if (error.code === 'ECONNRESET') {
+      res.status(500).json({ message: "Error de conexión con la base de datos, por favor intente nuevamente más tarde." });
+    } else {
       res.status(500).json({ message: "Error al obtener los datos de la empresa." });
     }
-  });
-  
+  }
+});
+
   //=====================================================================
 // Crear un endpoint para insertar o actualizar los datos de la empresa
 routerEmpresa.post("/actualizar", csrfProtection, async (req, res) => {

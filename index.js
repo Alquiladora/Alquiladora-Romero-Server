@@ -69,17 +69,18 @@ app.use((err, req, res, next) => {
 
 const server = http.createServer(app);
 
-const io = initSocket(server);
+
 
 
 
 server.listen(port, () => {
   console.log(`🚀 Servidor en http://localhost:${port}`);
+
+  const io = initSocket(server);
 });
 
 
 module.exports = {
   app,
   server,
-  io
 };

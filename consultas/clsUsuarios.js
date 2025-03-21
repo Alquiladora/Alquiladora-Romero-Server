@@ -13,19 +13,17 @@ const otplib = require("otplib");
 const qrcode = require("qrcode");
 
 const { pool } = require("../connectBd");
-const { getIO } = require("../config/socket");
+const { getIO, getUserSockets } = require("../config/socket");
 const usuarioRouter = express.Router();
 usuarioRouter.use(express.json());
 usuarioRouter.use(cookieParser());
-
+const userSockets = getUserSockets();
 
 //Variables para el ip
 const SECRET_KEY = process.env.SECRET_KEY.padEnd(32, " ");
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_TIME = 10 * 60 * 1000;
 const TOKEN_EXPIRATION_TIME = 24 * 60 * 60 * 1000;
-const INACTIVITY_TIMEOUT = 10 * 60 * 1000; //10 mnts
-const TOKEN_RENEW_THRESHOLD = 2 * 60 * 1000;
 
 
 
@@ -94,6 +92,8 @@ function obtenerFechaMexico() {
 }
 
 
+
+
 //=============================REGISTRO=============================
 usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
   const { nombre, apellidoP, apellidoM, correo, telefono, password } = req.body;
@@ -122,22 +122,25 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
       [correo, telefono]
     );
 
+    let noClienteId;
+
     if (!noCliente.length) {
-      console.log("Cliente no encontrado en tblnoclientes")
-      return res.status(404).json({ message: "Cliente no encontrado en tblnoclientes" });
+      console.log("Cliente no encontrado en tblnoclientes, este cliente es nuevo")
     }
 
-    console.log("Estos datos son de idNoclientes", noCliente[0].idNoClientes)
-
+  
     const insertUserQuery = `
       INSERT INTO tblusuarios 
       (nombre, apellidoP, apellidoM, correo, telefono, password, rol, estado, multifaltor, fechaCreacion) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
+
+
     const [result] = await connection.query(insertUserQuery, [
       nombreFormateado, apellidoPFormateado, apellidoMFormateado, correo, telefono,
       hashedPassword, "cliente", 1, null, fechaCreacion
     ]);
+
     const insertId = result.insertId;
 
     if (!insertId) {
@@ -147,16 +150,27 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
   
     
     if (noCliente.length > 0) {
-      
+      console.log("Estos datos son de idNoclientes", noCliente[0].idNoClientes)
+
       const [pedidos] = await connection.query(
         `SELECT idDireccion FROM tblpedidos 
          WHERE idNoClientes = ? 
-         AND LOWER(estado) IN ('finalizado', 'cancelado')`,
+         AND LOWER(estado) IN ('finalizado', 'cancelado','perdido','incidencia','incompleto')`,
         [noCliente[0].idNoClientes]
       );
       console.log("valor de idDireccion", pedidos)
 
       if (pedidos.length > 0) {
+        
+        await connection.query(
+          `UPDATE tblpedidos 
+           SET idDireccion = NULL 
+           WHERE idNoClientes = ? 
+           AND estado IN ('finalizado', 'cancelado')`,
+          [noCliente[0].idNoClientes]
+        );
+
+
         await connection.query(`DELETE FROM tbldireccioncliente WHERE idNoClientes = ?`, [noCliente[0].idNoClientes]);
       }
 
@@ -177,7 +191,7 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
     
     const [usuarios] = await pool.query(`SELECT COUNT(*) AS totalUsuarios FROM tblusuarios`);
     const totalUsuarios = usuarios[0].totalUsuarios;
-    getIO().emit("actualizacionUsuarios", { totalUsuarios });
+    getIO().emit("totalUsuarios", { totalUsuarios });
 
     res.status(201).json({
       message: "Usuario creado exitosamente",
@@ -238,7 +252,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
         .json({ message: "Email y contraseña son obligatorios." });
     }
 
-    //capchapt token obtenido
+   
     const cookiesId = uuidv4();
 
     // Verificar si la conexión a la base de datos está disponible
@@ -271,7 +285,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
         ? new Date(bloqueo.lock_until)
         : null;
 
-      // **
+      
       if (bloqueos.length > 0 && bloqueos[0].bloqueado === 1) {
         return res.status(403).json({
           message: "Cuenta bloqueada por el administrador.",
@@ -303,7 +317,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
           bloqueo.lock_until = lockTime;
         }
 
-        // **3.2. Calcular el tiempo restante de bloqueo**
+       
         const tiempoRestanteSegundos = Math.ceil(
           (bloqueo.lock_until - ahora) / 1000
         );
@@ -394,14 +408,6 @@ usuarioRouter.post("/login", async (req, res, next) => {
       deviceType,       
       token             
     ]);
-
-      console.log("Datso recibidos de sesiones ", usuario.idUsuarios,
-        cookiesId,
-        clientTimestamp,
-        ip,
-        deviceType,
-        token,);
-
       console.log("Sesión insertada en tblsesiones");
     } catch (insertError) {
       console.error("Error al insertar la sesión en tblsesiones:", insertError);
@@ -409,6 +415,18 @@ usuarioRouter.post("/login", async (req, res, next) => {
     }
   
 
+
+    if (usuario && usuario.idUsuarios) {
+      const userSocket = userSockets[usuario.idUsuarios];
+      if (userSocket) {
+        userSocket.emit('usuarioAutenticado', { idUsuarios: usuario.idUsuarios });
+      } else {
+        console.log(`⚠️ Usuario ${usuario.idUsuarios} no tiene un socket activo.`);
+      }
+    } else {
+      console.log('El objeto usuario no tiene la propiedad idUsuarios');
+    }
+    
     // Responder con éxito
     res.json({
       message: "Login exitoso",
@@ -451,7 +469,7 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
       `Registro de bloqueo creado para el usuario con ID ${idUsuarios}`
     );
   } else {
-    // Si ya existe un registro, actualizamos los intentos fallidos
+  
     const bloqueo = result[0];
     const newAttempts = bloqueo.intentos + 1;
     const newIntentosReales = bloqueo.intentosReales + 1;
@@ -492,10 +510,7 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
   const token = req.cookies.sesionToken;
-
-
   if (!token) {
-   
     return res.status(403).json({ message: "No tienes token de acceso." });
   }
 
@@ -513,12 +528,10 @@ const verifyToken = async (req, res, next) => {
         message: "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
       });
     }
-
     req.user = decoded;
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
-     
       return res.status(401).json({ message: "El token ha expirado. Inicia sesión nuevamente." });
     }
    
@@ -532,7 +545,6 @@ const verifyToken = async (req, res, next) => {
 usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
   const userId = req.user.id;
   try {
-    
     const query = `
     SELECT 
       u.nombre, 
@@ -583,6 +595,7 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
         fechaCreacion: usuario.fechaCreacion,
       },
     });
+
   } catch (error) {
     console.error("Error al obtener el perfil del usuario:", error);
     res
@@ -1288,46 +1301,57 @@ async function verificarYLimpiarNoClientes() {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    // 1. Obtener todos los "no clientes" que ahora son clientes
     const [noClientes] = await connection.query(`
-      SELECT n.idNoClientes, n.correo, n.telefono, u.idUsuarios
-      FROM tblnoclientes n
-      INNER JOIN tblusuarios u ON n.correo = u.correo OR n.telefono = u.telefono
-      WHERE u.rol = 'cliente'
+      SELECT DISTINCT nc.idNoClientes
+FROM tblnoclientes nc
+INNER JOIN tblpedidos p ON nc.idNoClientes = p.idNoClientes
+WHERE p.estado IN ('finalizado', 'cancelado')
+  AND p.fechaRegistro < DATE_SUB(NOW(), INTERVAL 1 MONTH)
+  AND nc.idUsuario IS NULL;
+
     `);
 
-    // 2. Procesar cada "no cliente"
-    for (const noCliente of noClientes) {
-      // Verificar si hay pedidos activos
-      const [pedidos] = await connection.query(
-        `SELECT idDireccion FROM tblpedidos WHERE idNoClientes = ? AND estado IN ('finalizado', 'Finalizado', 'cancelado', 'Cancelado')`,
-        [noCliente.idNoClientes]
-      );
-
-      // Si no hay pedidos activos, eliminar registros
-      if (pedidos.length === 0) {
-        await connection.query(`DELETE FROM tbldireccioncliente WHERE idNoClientes = ?`, [noCliente.idNoClientes]);
-        await connection.query(`DELETE FROM tblnoclientes WHERE idNoClientes = ?`, [noCliente.idNoClientes]);
-        console.log(`Registros eliminados para el no cliente con ID: ${noCliente.idNoClientes}`);
-      }
+    if (noClientes.length === 0) {
+      console.log("No hay no clientes para eliminar.");
+      return;
     }
 
+    const idsNoClientes = noClientes.map(nc => nc.idNoClientes);
+
+ 
+    await connection.query(`
+      DELETE p, d, nc
+      FROM tblpedidos p
+      JOIN tbldireccioncliente d ON p.idNoClientes = d.idNoClientes
+      JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      WHERE p.idNoClientes IN (?);
+    `, [idsNoClientes]);
+
+
+    console.log(`Eliminados ${idsNoClientes.length} no clientes.`);
     await connection.commit();
   } catch (error) {
     console.error("Error en la verificación y limpieza de no clientes:", error);
-    if (connection) await connection.rollback();
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("Error al hacer rollback:", rollbackError);
+      }
+    }
   } finally {
     if (connection) connection.release();
   }
 }
 
-
-
-cron.schedule("0 0 1 */6 *", async () => {
+cron.schedule("0 0 * * *", async () => {
   console.log("Ejecutando verificación y limpieza de no clientes...");
   await verificarYLimpiarNoClientes();
   console.log("Verificación y limpieza completada.");
+}, {
+  timezone: "America/Mexico_City"
 });
+
 
 
 module.exports = usuarioRouter;

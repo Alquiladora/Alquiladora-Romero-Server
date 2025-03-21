@@ -19,17 +19,13 @@ const ClsBodegas = require("./consultas/clsBodegas")
 const ClsInventario = require("./consultas/clsInventario")
 const ClsDirrecion= require("./consultas/clsDireccion")
 const ClsPedidos = require("./consultas/clsPedidos")
+const ClsCarrito= require("./consultas/clsCarrito")
 
 
 router.get('/get-csrf-token',csrfProtection , (req, res) => {
     res.json({ csrfToken: req.csrfToken() });
   });
 
-  //Ping de conectividad
-  router.get("/status", (req, res) => {
-    res.status(200).json({ status: "ok" });
-  });
-  
 
 //=========================RUTAS=======================================
 
@@ -52,6 +48,8 @@ router.use('/bodegas',ClsBodegas);
 router.use('/inventario', ClsInventario);
 router.use('/direccion', ClsDirrecion);
 router.use('/pedidos', ClsPedidos);
+router.use('/carrito', ClsCarrito);
+
 
 
 

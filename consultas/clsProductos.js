@@ -111,16 +111,18 @@ produtosRouter.get("/bodegas", async (req, res) => {
 
 produtosRouter.get("/subcategorias", async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-        SELECT
-          c.idCategoria,
-          c.nombre AS categoryName,
-          sc.idSubcategoria,
-          sc.nombre AS subcatName
-        FROM tblcategoria c
-        JOIN tblsubcategoria sc ON c.idCategoria = sc.idCategoria
-        ORDER BY c.nombre, sc.nombre
-      `);
+    const connection = await pool.getConnection(); 
+    const [rows] = await connection.query(`
+      SELECT
+        c.idCategoria,
+        c.nombre AS categoryName,
+        sc.idSubcategoria,
+        sc.nombre AS subcatName
+      FROM tblcategoria c
+      JOIN tblsubcategoria sc ON c.idCategoria = sc.idCategoria
+      ORDER BY c.nombre, sc.nombre
+    `);
+    connection.release(); // Libera la conexión después de la consulta
 
     const categoryMap = {};
     rows.forEach((row) => {
@@ -147,9 +149,18 @@ produtosRouter.get("/subcategorias", async (req, res) => {
     });
   } catch (error) {
     console.error("Error al obtener subcategorias:", error);
+
+    if (error.code === "ECONNRESET") {
+      return res.status(500).json({
+        success: false,
+        message:
+          "Se perdió la conexión con la base de datos. Inténtalo de nuevo.",
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
+      message: "Error interno del servidor.",
     });
   }
 });
@@ -224,6 +235,7 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
           c.idCategoria,
           c.nombre AS nombreCategoria,
           pr.precioAlquiler,
+          i.idProductoColor,
           COALESCE(SUM(i.stock), 0) AS stock,
           col.color AS nombreColor,
           GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
@@ -244,6 +256,7 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
           ON p.idProducto = f.idProducto
         WHERE p.idProducto = ?
         GROUP BY p.idProducto, col.idColores;
+
       `;
       
       const [rows] = await pool.query(sql, [id]);
@@ -270,7 +283,8 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
         imagenes: rows[0].imagenes,
         variantes: rows.map(row => ({
           nombreColor: row.nombreColor,
-          stock: row.stock
+          stock: row.stock,
+          idProductoColor: row.idProductoColor,
         }))
       };
       
