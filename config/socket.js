@@ -20,6 +20,13 @@ module.exports = {
       io.on("connection", (socket) => {
         console.log(`🔗 Nuevo cliente conectado: ${socket.id}`);
 
+        const userIdFromQuery = socket.handshake.query.idUsuario;
+        if (userIdFromQuery) {
+          console.log(`✅ Usuario ${userIdFromQuery} conectado desde query con socket ${socket.id}`);
+          userSockets[userIdFromQuery] = socket;
+          socket.userId = userIdFromQuery;
+        }
+
     
         socket.on("usuarioAutenticado", (userId) => {
           console.log(`✅ Usuario ${userId} registrado con el socket ${socket.id}`);
