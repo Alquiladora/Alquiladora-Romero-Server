@@ -10,6 +10,7 @@
   "license": "ISC",
   "keywords": [],
   "dependencies": {
+    "@google/generative-ai": "^0.24.0",
     "argon2": "^0.41.1",
     "axios": "^1.7.9",
     "bull": "^4.16.5",

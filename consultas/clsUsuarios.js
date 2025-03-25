@@ -399,7 +399,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
         (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
       VALUES (?, ?, ?, ?, ?, ?, NULL)
     `;
-    
+     console.log("Valor de tiempode inico", clientTimestamp)
     await pool.query(sessionQuery, [
       usuario.idUsuarios,
       cookiesId,     
@@ -1253,15 +1253,19 @@ usuarioRouter.get("/:idUsuario/sesiones", async (req, res, next) => {
   try {
     const [sesiones] = await pool.query(
       `
+       
       SELECT 
-        id,
-        horaInicio,
-        horaFin,
-        direccionIP,
-        tipoDispositivo
-      FROM tblsesiones
-      WHERE idUsuario = ?
-      ORDER BY horaInicio DESC
+    idSesion,
+    idUsuarios,
+    horaInicio,
+    horaFin,
+    direccionIP,
+    tipoDispositivo
+FROM tblsesiones
+WHERE idUsuarios = ?
+ORDER BY horaInicio DESC;
+
+      
     `,
       [idUsuario]
     );

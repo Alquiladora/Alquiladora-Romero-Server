@@ -20,6 +20,8 @@ const ClsInventario = require("./consultas/clsInventario")
 const ClsDirrecion= require("./consultas/clsDireccion")
 const ClsPedidos = require("./consultas/clsPedidos")
 const ClsCarrito= require("./consultas/clsCarrito")
+const ClsColores = require('./consultas/clsColores')
+const ClsHorario= require('./consultas/clsHorario')
 
 
 router.get('/get-csrf-token',csrfProtection , (req, res) => {
@@ -49,6 +51,9 @@ router.use('/inventario', ClsInventario);
 router.use('/direccion', ClsDirrecion);
 router.use('/pedidos', ClsPedidos);
 router.use('/carrito', ClsCarrito);
+router.use('/colores',ClsColores)
+router.use('/horario',ClsHorario)
+
 
 
 

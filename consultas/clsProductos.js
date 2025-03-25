@@ -23,7 +23,6 @@ SELECT
     s.idSubcategoria,
     s.nombre               AS NombreSubCategoria,
     c.nombre               AS NombreCategoria,
-    pr.precioAdquirido,
     u.nombre               AS NombreUsuario,
     u.correo               AS EmailUsuario,
     GROUP_CONCAT(DISTINCT col.color ORDER BY col.color SEPARATOR ', ') AS ColorProducto,

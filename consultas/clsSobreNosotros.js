@@ -77,38 +77,35 @@ routerSobreNosotros.post("/", csrfProtection, async (req, res) => {
 
 routerSobreNosotros.put("/:id", csrfProtection, async (req, res) => {
   const { id } = req.params;
-  const { quienesSomos, nuestraHistoria } = req.body;
+  const { quienesSomos, nuestraHistoria, mision, vision } = req.body;
 
-  if (!quienesSomos || !nuestraHistoria) {
-    return res.status(400).json({
-      error: "Los campos 'quienesSomos' y 'nuestraHistoria' son obligatorios",
-    });
-  }
+
+
 
   let connection;
   try {
     connection = await pool.getConnection();
 
-   
+    
     const [rowsCheck] = await connection.query(
       "SELECT id FROM tblsobrenosotros WHERE id = ?",
       [id]
     );
 
     if (rowsCheck.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "No se encontró la información de 'Sobre Nosotros'" });
+      return res.status(404).json({
+        error: "No se encontró la información de 'Sobre Nosotros' con ese ID",
+      });
     }
 
-    
+   
     await connection.query(
       `
         UPDATE tblsobrenosotros
-        SET quienesSomos = ?, nuestraHistoria = ?
+        SET quienesSomos = ?, nuestraHistoria = ?, mision = ?, vision = ?, updated_at = NOW()
         WHERE id = ?
       `,
-      [quienesSomos, nuestraHistoria, id]
+      [quienesSomos, nuestraHistoria, mision, vision, id]
     );
 
     res.json({ message: "Información actualizada exitosamente" });
