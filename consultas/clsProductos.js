@@ -509,10 +509,25 @@ produtosRouter.delete(
     try {
       const { id } = req.params;
 
+    
+      const [dependientes] = await pool.query(
+        "SELECT COUNT(*) as count FROM tblpedidodetalles WHERE idProductoColores = ?",
+        [id]
+      );
+
+      if (dependientes[0].count > 0) {
+     
+        return res.status(400).json({
+          success: false,
+          message: `No se puede eliminar el producto porque está asociado a ${dependientes[0].count} pedidos activos.`,
+        });
+      }
+
+    
       const [result] = await pool.query(`CALL DeleteProductos (?);`, [id]);
       res.status(201).json({
         success: true,
-        message: "Producto eliminado correcatamente",
+        message: "Producto eliminado correctamente",
         idProducto: result.insertId,
       });
     } catch (error) {
