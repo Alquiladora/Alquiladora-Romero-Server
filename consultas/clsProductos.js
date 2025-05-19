@@ -237,6 +237,7 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
           i.idProductoColor,
           COALESCE(SUM(i.stock), 0) AS stock,
           col.color AS nombreColor,
+          col.codigoH,
           GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
         FROM tblproductos p
         JOIN tblsubcategoria sc 
@@ -255,7 +256,6 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
           ON p.idProducto = f.idProducto
         WHERE p.idProducto = ?
         GROUP BY p.idProducto, col.idColores;
-
       `;
       
       const [rows] = await pool.query(sql, [id]);
@@ -282,6 +282,7 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
         imagenes: rows[0].imagenes,
         variantes: rows.map(row => ({
           nombreColor: row.nombreColor,
+          colorH: row.codigoH,
           stock: row.stock,
           idProductoColor: row.idProductoColor,
         }))

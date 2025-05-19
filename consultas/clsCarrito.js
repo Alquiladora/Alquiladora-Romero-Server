@@ -521,4 +521,148 @@ routerCarrito.put("/actualizar/:idCarrito", async (req, res) => {
     }
 });
 
+
+const generateNumericTrackingId = () => {
+    const timestamp = Date.now().toString();
+    const randomDigits = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
+    return `ROMERO-${timestamp}-${randomDigits}`;
+  };
+
+
+  const getMexicoCityTime = () => {
+    return moment().tz("America/Mexico_City").format("HH:mm:ss");
+  };
+  
+
+  routerCarrito.post("/procesar", csrfProtection, async (req, res) => {
+    const { userId, total, direccion, metodoPago, rentalDate, returnDate, items } = req.body;
+  
+    
+    if (!userId || !total || !direccion || !metodoPago || !rentalDate || !returnDate || !items) {
+      console.log("Datos incompletos", { userId, total, direccion, metodoPago, rentalDate, returnDate, items });
+      return res.status(400).json({ success: false, message: "Datos incompletos." });
+    }
+  
+    const trackingId = generateNumericTrackingId();
+    const fechaActual = moment().format("YYYY-MM-DD HH:mm:ss");
+    const horaAlquiler = getMexicoCityTime();
+  
+    try {
+  
+      await pool.query("START TRANSACTION");
+  
+      
+      const [procedureResult] = await pool.query(
+        "CALL sp_procesar_pedido(?, ?, ?, ?, ?, ?, ?, ?, ?,?, @p_idPedido, @p_idPago, @p_error_message)",
+        [
+          userId,
+          direccion.idDireccion,
+          total,
+          rentalDate,
+          returnDate,
+          horaAlquiler,
+          metodoPago,
+          JSON.stringify(items),
+          fechaActual,
+          trackingId,
+        ]
+      );
+  
+      const [outParams] = await pool.query(
+        "SELECT @p_idPedido AS p_idPedido, @p_idPago AS p_idPago, @p_error_message AS p_error_message"
+      );
+  
+      const { p_idPedido, p_idPago, p_error_message } = outParams[0];
+  
+      if (p_error_message) {
+        await pool.query("ROLLBACK");
+        console.log("Error al procesar el pedido", { userId, error: p_error_message });
+        return res.status(400).json({ success: false, message: p_error_message });
+      }
+  
+     
+      const paymentProcessors = {
+        paypal: procesarPagoPayPal,
+        debito: procesarPagoStripe,
+        spei: procesarPagoSPEI,
+        mercadoPago: procesarPagoMercadoPago,
+        oxxo: procesarPagoOXXO,
+        deposito: () => ({
+          success: true,
+          details: {
+            instructions: "Realiza tu depósito a la cuenta: Banco Ejemplo, Cuenta: 1234-5678-9012-3456, CLABE: 012345678901234567. Envía tu comprobante a pagos@alquiladora.com."
+          }
+        })
+      };
+  
+      let estadoPago = "pendiente";
+      let detallesPago = null;
+  
+    
+      if (!paymentProcessors[metodoPago]) {
+        await pool.query("ROLLBACK");
+        throw new Error("Método de pago no soportado");
+      }
+  
+      const paymentResponse = await paymentProcessors[metodoPago](total, p_idPedido);
+      
+      if (paymentResponse.success) {
+        estadoPago = metodoPago === "spei" || metodoPago === "oxxo" || metodoPago === "deposito" 
+          ? "pendiente" 
+          : "completado";
+        detallesPago = JSON.stringify(paymentResponse.details || {});
+      } else {
+        estadoPago = "fallido";
+        detallesPago = JSON.stringify({ error: paymentResponse.error });
+      }
+  
+     
+      await pool.query(
+        "UPDATE tblpagos SET estadoPago = ?, detallesPago = ? WHERE idPago = ?",
+        [estadoPago, detallesPago,  p_idPago]
+      );
+  
+      await pool.query("COMMIT");
+  
+      console.log("Pedido procesado exitosamente", { userId, idPedido: p_idPedido, idPago: p_idPago, trackingId });
+      
+      return res.status(201).json({
+        success: true,
+        idPedido: p_idPedido,
+        idPago: p_idPago,
+        trackingId,
+        estadoPago,
+        detallesPago: detallesPago ? JSON.parse(detallesPago) : null,
+      });
+  
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      console.error("Error al procesar el pedido", { userId, error: error.message });
+      return res.status(500).json({ success: false, message: "Error al procesar el pedido." });
+    }
+  });
+  
+ 
+
+
+  const procesarPagoPayPal = async (total, idPedido) => {
+    return { success: true, transactionId: "PAYPAL123", payerEmail: "user@example.com" };
+  };
+  
+  const procesarPagoStripe = async (total, idPedido) => {
+    return { success: true, paymentIntentId: "STRIPE123" };
+  };
+  
+  const procesarPagoSPEI = async (total, idPedido) => {
+    return { success: true, clabe: "123456789012345678", bank: "Banco Ejemplo", reference: "REF123" };
+  };
+  
+  const procesarPagoMercadoPago = async (total, idPedido) => {
+    return { success: true, paymentId: "MP123" };
+  };
+  
+  const procesarPagoOXXO = async (total, idPedido) => {
+    return { success: true, barcode: "OXXO123", reference: "REF456" };
+  };
+
 module.exports = routerCarrito;

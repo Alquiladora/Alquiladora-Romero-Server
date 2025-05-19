@@ -8,6 +8,7 @@ const { init: initSocket } = require('./config/socket');
 //=====================RUTAS==========================
 const routers = require('./rutas');
 const connect = require('./connectBd');
+const logger = require('./config/logs')
 
 //==================================================
 
@@ -15,7 +16,36 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(express.json());
-app.use(helmet());
+
+app.use(helmet({
+ 
+  hsts: process.env.NODE_ENV === 'production' ? {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  } : false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      connectSrc: [
+        "'self'",
+        ...(process.env.NODE_ENV === 'production' ? [
+          "wss://alquiladora-romero-server.onrender.com", 
+          "https://alquiladora-romero-server.onrender.com", 
+        ] : [
+          "ws://localhost:3001", 
+          "http://localhost:3001", 
+        ]),
+      ],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https://alquiladoraromero.bina5.com"],
+    },
+  },
+  frameguard: { action: 'deny' },
+  xssFilter: false,
+  ieNoOpen: false,
+}));
+
 app.use(cookieParser());
 
 // Configuración de CORS
@@ -40,15 +70,7 @@ app.use(cors({
 }));
 app.options('*', cors());
 
-// Conectar a la base de datos
-(async () => {
-  try {
-    await connect.connect();
-    console.log('✅ Conexión a la base de datos establecida');
-  } catch (error) {
-    console.error('❌ Fallo al conectar a la base de datos:', error);
-  }
-})();
+
 
 
 //=================RUTAS DEFINIDOS=======================
@@ -58,26 +80,46 @@ app.use('/api', routers);
 
 // 📌 **Middleware Global para Manejo de Errores 500**
 app.use((err, req, res, next) => {
-  console.error("⚠️ Error detectado:", err.stack);
-  res.status(500).json({ 
-    error: "Error interno del servidor",
-    message: err.message 
+  logger.error('Error del sistema detectado', {
+    method: req.method,
+    url: req.url,
+    stack: err.stack,
+    ip: req.ip,
+    timestamp: new Date().toISOString(),
   });
+  if (process.env.NODE_ENV === 'production') {
+    res.status(500).json({ error: 'Error interno del servidor' });
+  } else {
+    res.status(500).json({ error: 'Error interno del servidor', message: err.message });
+  }
 });
-
 
 
 const server = http.createServer(app);
 
 
 
+const startServer = async () => {
+  try {
+    await connect.connect();
+    logger.info('Conexión a la base de datos establecida', { 
+      db: process.env.DB_NAME || 'unknown' 
+    });
+    server.listen(port, () => {
+     
+      const io = initSocket(server);
+      logger.info('WebSocket inicializado');
+    });
+  } catch (error) {
+    logger.error('Fallo al conectar a la base de datos', { 
+      error: error.message, 
+      stack: error.stack 
+    });
+    process.exit(1);
+  }
+};
+startServer();
 
-
-server.listen(port, () => {
-  console.log(`🚀 Servidor en http://localhost:${port}`);
-
-  const io = initSocket(server);
-});
 
 
 module.exports = {

@@ -1,5 +1,5 @@
 let io;
-const userSockets = {}; // Almacenar sockets de usuarios conectados
+const userSockets = {}; 
 
 module.exports = {
   init: (server) => {
@@ -36,8 +36,6 @@ module.exports = {
 
   
         socket.on("mensajePrivado", ({ receptorId, mensaje }) => {
-          console.log(`📩 Mensaje de ${socket.userId} para ${receptorId}: ${mensaje}`);
-          
           if (userSockets[receptorId]) {
             userSockets[receptorId].emit("nuevoMensaje", {
               emisorId: socket.userId,
@@ -47,6 +45,7 @@ module.exports = {
             console.log(`⚠️ Usuario ${receptorId} no está conectado.`);
           }
         });
+
 
         // Manejar desconexión
         socket.on("disconnect", () => {
@@ -71,5 +70,6 @@ module.exports = {
     return io;
   },
   getUserSockets: () => userSockets,
+  
  
 };

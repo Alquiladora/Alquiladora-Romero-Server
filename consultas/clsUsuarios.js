@@ -3,7 +3,6 @@ const argon2 = require("argon2");
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
-const rateLimit = require("express-rate-limit");
 const winston = require("winston");
 const crypto = require("crypto");
 const { csrfProtection } = require("../config/csrf");
@@ -25,7 +24,9 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_TIME = 10 * 60 * 1000;
 const TOKEN_EXPIRATION_TIME = 24 * 60 * 60 * 1000;
 
+//importamos el recaptchat
 
+const { VeryfyRecapcha } = require("../config/recapcha");
 
 // Configurar winston logger
 const logger = winston.createLogger({
@@ -34,11 +35,9 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
 });
 
-
 if (!process.env.SECRET_KEY) {
   throw new Error("La variable de entorno SECRET_KEY no está definida.");
 }
-
 
 //========================COOKIES================================================
 //Encriptamos el clientId
@@ -68,31 +67,10 @@ function decryptClientId(encrypted) {
   return decrypted;
 }
 
-//Creamos un identificador unico para el cliente
-function getOrCreateClientId(req, res) {
-  let clientId = req.cookies.clientId;
-  if (!clientId) {
-    clientId = uuidv4();
-    const encryptedClientId = encryptClientId(clientId);
-    res.cookie("clientId", encryptedClientId, {
-      maxAge: 365 * 24 * 60 * 60 * 1000, 
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "None",
-    });
-  } else {
-    clientId = decryptClientId(clientId);
-  }
-  return clientId;
-}
-
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
   return moment().tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss");
 }
-
-
-
 
 //=============================REGISTRO=============================
 usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
@@ -107,7 +85,8 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
       return res.status(400).json({ message: "La contraseña es obligatoria" });
     }
 
-    const capitalizeFirstLetter = (str) => str?.charAt(0).toUpperCase() + str.slice(1).toLowerCase() || "";
+    const capitalizeFirstLetter = (str) =>
+      str?.charAt(0).toUpperCase() + str.slice(1).toLowerCase() || "";
 
     const nombreFormateado = capitalizeFirstLetter(nombre);
     const apellidoPFormateado = capitalizeFirstLetter(apellidoP);
@@ -116,29 +95,34 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
     const hashedPassword = await argon2.hash(password);
     const fechaCreacion = obtenerFechaMexico();
 
-    
     const [noCliente] = await connection.query(
       `SELECT idNoClientes FROM tblnoclientes WHERE correo = ? OR telefono = ? LIMIT 1`,
       [correo, telefono]
     );
 
-    let noClienteId;
-
     if (!noCliente.length) {
-      console.log("Cliente no encontrado en tblnoclientes, este cliente es nuevo")
+      console.log(
+        "Cliente no encontrado en tblnoclientes, este cliente es nuevo"
+      );
     }
 
-  
     const insertUserQuery = `
       INSERT INTO tblusuarios 
       (nombre, apellidoP, apellidoM, correo, telefono, password, rol, estado, multifaltor, fechaCreacion) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-
     const [result] = await connection.query(insertUserQuery, [
-      nombreFormateado, apellidoPFormateado, apellidoMFormateado, correo, telefono,
-      hashedPassword, "cliente", 1, null, fechaCreacion
+      nombreFormateado,
+      apellidoPFormateado,
+      apellidoMFormateado,
+      correo,
+      telefono,
+      hashedPassword,
+      "cliente",
+      1,
+      null,
+      fechaCreacion,
     ]);
 
     const insertId = result.insertId;
@@ -147,10 +131,9 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
       await connection.rollback();
       return res.status(500).json({ message: "Error al registrar usuario" });
     }
-  
-    
+
     if (noCliente.length > 0) {
-      console.log("Estos datos son de idNoclientes", noCliente[0].idNoClientes)
+      console.log("Estos datos son de idNoclientes", noCliente[0].idNoClientes);
 
       const [pedidos] = await connection.query(
         `SELECT idDireccion FROM tblpedidos 
@@ -158,10 +141,9 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
          AND LOWER(estado) IN ('finalizado', 'cancelado','perdido','incidencia','incompleto')`,
         [noCliente[0].idNoClientes]
       );
-      console.log("valor de idDireccion", pedidos)
+      console.log("valor de idDireccion", pedidos);
 
       if (pedidos.length > 0) {
-        
         await connection.query(
           `UPDATE tblpedidos 
            SET idDireccion = NULL 
@@ -170,11 +152,16 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
           [noCliente[0].idNoClientes]
         );
 
-
-        await connection.query(`DELETE FROM tbldireccioncliente WHERE idNoClientes = ?`, [noCliente[0].idNoClientes]);
+        await connection.query(
+          `DELETE FROM tbldireccioncliente WHERE idNoClientes = ?`,
+          [noCliente[0].idNoClientes]
+        );
       }
 
-      await connection.query(`UPDATE tblnoclientes SET idUsuario = ? WHERE idNoClientes = ?`, [insertId, noCliente[0].idNoClientes]);
+      await connection.query(
+        `UPDATE tblnoclientes SET idUsuario = ? WHERE idNoClientes = ?`,
+        [insertId, noCliente[0].idNoClientes]
+      );
 
       await connection.query(
         `UPDATE tblnoclientes SET idUsuario = ?, nombre = NULL, apellidoCompleto = NULL, correo = NULL, telefono = NULL 
@@ -188,14 +175,15 @@ usuarioRouter.post("/registro", csrfProtection, async (req, res, next) => {
 
     await connection.commit();
 
-    
-    const [usuarios] = await pool.query(`SELECT COUNT(*) AS totalUsuarios FROM tblusuarios`);
+    const [usuarios] = await pool.query(
+      `SELECT COUNT(*) AS totalUsuarios FROM tblusuarios`
+    );
     const totalUsuarios = usuarios[0].totalUsuarios;
     getIO().emit("totalUsuarios", { totalUsuarios });
 
     res.status(201).json({
       message: "Usuario creado exitosamente",
-      userId: insertId
+      userId: insertId,
     });
   } catch (error) {
     console.error("Error en el registro:", error);
@@ -218,32 +206,12 @@ usuarioRouter.get("/", async (req, res, next) => {
 });
 
 ///==========================================================================================================================================================================================
-async function verifyRecaptcha(captchaToken) {
-  try {
-    const response = await axios.post(
-      "https://www.google.com/recaptcha/api/siteverify",
-      null,
-      {
-        params: {
-          secret: process.env.RECAPTCHA_SECRET_KEY,
-          response: captchaToken,
-        },
-      }
-    );
-    console.log("response Verfica Recapchat", response.data);
-    return response.data.success;
-  } catch (error) {
-    return false;
-  }
-}
 
 //====================LOGIN=================================================
 usuarioRouter.post("/login", async (req, res, next) => {
   try {
-    // Extraer email, contraseña y token MFA (si se incluye)
     const { email, contrasena, tokenMFA, deviceType, captchaToken, ip } =
       req.body;
-
     const clientTimestamp = obtenerFechaMexico();
 
     if (!email || !contrasena) {
@@ -251,18 +219,35 @@ usuarioRouter.post("/login", async (req, res, next) => {
         .status(400)
         .json({ message: "Email y contraseña son obligatorios." });
     }
+    if (!captchaToken) {
+      return res.status(400).json({ message: "Token de reCAPTCHA requerido." });
+    }
+    if (!ip || !deviceType) {
+      return res
+        .status(400)
+        .json({ message: "IP y tipo de dispositivo son obligatorios." });
+    }
 
-   
+    const recaptchaResult = await VeryfyRecapcha(captchaToken, "login", 0.5);
+    if (!recaptchaResult.success) {
+      return res
+        .status(400)
+        .json({ message: "Validación de reCAPTCHA fallida." });
+    }
+
+    console.log("Resultado de reCAPTCHA (login):", recaptchaResult);
+
     const cookiesId = uuidv4();
 
-    // Verificar si la conexión a la base de datos está disponible
     if (!pool) {
       throw new Error("La conexión a la base de datos no está disponible.");
     }
 
-    // Buscar al usuario por correo
-    const query = "SELECT * FROM tblusuarios WHERE correo = ?";
-    const [result] = await pool.query(query, [email]);
+    const [result] = await pool.query(
+      "SELECT * FROM tblusuarios WHERE correo = ?",
+      [email]
+    );
+
     if (!Array.isArray(result) || result.length === 0) {
       console.log("Credenciales Incorrectas");
       return res.status(401).json({ message: "Credenciales Incorrectas" });
@@ -273,70 +258,48 @@ usuarioRouter.post("/login", async (req, res, next) => {
     //===================================================================================================
 
     // Verificar si el usuario está bloqueado
-    const bloqueoQuery = "SELECT * FROM tblipbloqueados WHERE idUsuarios = ?";
-    const [bloqueos] = await pool.query(bloqueoQuery, [usuario.idUsuarios]);
+    const [bloqueos] = await pool.query(
+      "SELECT intentos, bloqueado, lock_until FROM tblipbloqueados WHERE idUsuarios = ?",
+      [usuario.idUsuarios]
+    );
 
     if (bloqueos.length > 0) {
       const bloqueo = bloqueos[0];
       const ahora = new Date();
 
-      console.log("ahora", ahora);
-      const lockUntil = bloqueo.lock_until
-        ? new Date(bloqueo.lock_until)
-        : null;
+      const lockUntil = bloqueo.lock_until ? new Date(bloqueo.lock_until) : null;
 
-      
-      if (bloqueos.length > 0 && bloqueos[0].bloqueado === 1) {
+      if (bloqueos.bloqueado === 1) {
         return res.status(403).json({
           message: "Cuenta bloqueada por el administrador.",
         });
       }
 
       if (lockUntil && lockUntil <= ahora) {
-        console.log(
-          "El tiempo de bloqueo ha expirado. Desbloqueando usuario..."
-        );
-        const desbloqueoQuery = `
-      UPDATE tblipbloqueados 
-      SET intentos = 0, lock_until = NULL 
-      WHERE idUsuarios = ?`;
-        await pool.query(desbloqueoQuery, [usuario.idUsuarios]);
+        console.log(  "El tiempo de bloqueo ha expirado. Desbloqueando usuario..." );
+
+        await pool.query( ` UPDATE tblipbloqueados SET intentos = 0, lock_until = NULL  WHERE idUsuarios = ?`,
+         [usuario.idUsuarios]);
+       
         bloqueo.intentos = 0;
         bloqueo.lock_until = null;
-        console.log("Usuario desbloqueado correctamente.");
-      }
-
-      if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
+        console.log(`Usuario ${usuario.idUsuarios} desbloqueado correctamente.`);
+      }else if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
         if (!lockUntil) {
           const lockTime = new Date(ahora.getTime() + LOCK_TIME);
-          const actualizarLockQuery = `
-        UPDATE tblipbloqueados 
-        SET lock_until = ? 
-        WHERE idUsuarios = ?`;
-          await pool.query(actualizarLockQuery, [lockTime, usuario.idUsuarios]);
+          await pool.query(` UPDATE tblipbloqueados SET lock_until = ? WHERE idUsuarios = ?`,
+             [lockTime, usuario.idUsuarios]);
           bloqueo.lock_until = lockTime;
         }
 
-       
-        const tiempoRestanteSegundos = Math.ceil(
-          (bloqueo.lock_until - ahora) / 1000
-        );
-        let tiempoRestanteMensaje;
-        if (tiempoRestanteSegundos >= 60) {
-          const minutos = Math.floor(tiempoRestanteSegundos / 60);
-          const segundos = tiempoRestanteSegundos % 60;
-          tiempoRestanteMensaje = `${minutos} minuto${
-            minutos !== 1 ? "s" : ""
-          }${
-            segundos > 0
-              ? ` y ${segundos} segundo${segundos !== 1 ? "s" : ""}`
-              : ""
-          }`;
-        } else {
-          tiempoRestanteMensaje = `${tiempoRestanteSegundos} segundo${
-            tiempoRestanteSegundos !== 1 ? "s" : ""
-          }`;
-        }
+        const tiempoRestanteSegundos = Math.ceil((new Date(bloqueo.lock_until) - ahora) / 1000);
+        const tiempoRestanteMensaje = tiempoRestanteSegundos >= 60
+        ? `${Math.floor(tiempoRestanteSegundos / 60)} minuto${tiempoRestanteSegundos >= 120 ? 's' : ''}${
+            tiempoRestanteSegundos % 60 > 0 ? ` y ${tiempoRestanteSegundos % 60} segundo${tiempoRestanteSegundos % 60 !== 1 ? 's' : ''}` : ''
+          }`
+        : `${tiempoRestanteSegundos} segundo${tiempoRestanteSegundos !== 1 ? 's' : ''}`;
+
+
         return res.status(403).json({
           message: `Usuario bloqueado temporalmente. Inténtalo de nuevo en ${tiempoRestanteMensaje}.`,
           tiempoRestante: tiempoRestanteSegundos,
@@ -387,46 +350,42 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Crear la cookie de sesión
     res.cookie("sesionToken", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "local",
       sameSite: "None",
       maxAge: TOKEN_EXPIRATION_TIME,
     });
 
     // Insertar la sesión en tblsesiones
     try {
-      const sessionQuery = `
+     
+     
+      await pool.query(`
       INSERT INTO tblsesiones 
         (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
       VALUES (?, ?, ?, ?, ?, ?, NULL)
-    `;
-     console.log("Valor de tiempode inico", clientTimestamp)
-    await pool.query(sessionQuery, [
-      usuario.idUsuarios,
-      cookiesId,     
-      clientTimestamp,  
-      ip,               
-      deviceType,       
-      token             
-    ]);
-      console.log("Sesión insertada en tblsesiones");
+    `, 
+        [ usuario.idUsuarios,cookiesId,clientTimestamp,ip,deviceType,token]);
+      console.log(`Sesión insertada en tblsesiones para usuario ${usuario.idUsuarios}`);
     } catch (insertError) {
       console.error("Error al insertar la sesión en tblsesiones:", insertError);
       next(error);
     }
-  
-
 
     if (usuario && usuario.idUsuarios) {
       const userSocket = userSockets[usuario.idUsuarios];
       if (userSocket) {
-        userSocket.emit('usuarioAutenticado', { idUsuarios: usuario.idUsuarios });
+        userSocket.emit("usuarioAutenticado", {
+          idUsuarios: usuario.idUsuarios,
+        });
       } else {
-        console.log(`⚠️ Usuario ${usuario.idUsuarios} no tiene un socket activo.`);
+        console.log(
+          `⚠️ Usuario ${usuario.idUsuarios} no tiene un socket activo.`
+        );
       }
     } else {
-      console.log('El objeto usuario no tiene la propiedad idUsuarios');
+      console.log("El objeto usuario no tiene la propiedad idUsuarios");
     }
-    
+
     // Responder con éxito
     res.json({
       message: "Login exitoso",
@@ -446,63 +405,77 @@ usuarioRouter.post("/login", async (req, res, next) => {
 
 //================================Manejo de intentos fallidos de login=======================================
 async function handleFailedAttempt(ip, idUsuarios, pool) {
-  // Obtener la fecha y hora actual
-  const currentDate = new Date();
-  const fechaActual = currentDate.toISOString().split("T")[0];
-  const horaActual = currentDate.toTimeString().split(" ")[0];
+  try {
+    // Obtener la fecha y hora actual
+    const currentDate = new Date();
+    const fechaActual = currentDate.toISOString().split("T")[0];
+    const horaActual = currentDate.toTimeString().split(" ")[0];
 
-  // Consultar si ya existe un bloqueo para este usuario
-  const [result] = await pool.query(
-    "SELECT * FROM tblipbloqueados WHERE idUsuarios = ?",
-    [idUsuarios]
-  );
-
-  console.log("Bloqueado23", result);
-
-  if (result.length === 0) {
-    // Si no hay registros, insertamos uno nuevo
-    await pool.query(
-      "INSERT INTO tblipbloqueados (idUsuarios, ip, fecha, hora, intentos, intentosReales,bloqueado) VALUES (?, ?, ?, ?, ?, ?, ? )",
-      [idUsuarios, ip, fechaActual, horaActual, 1, 1, 0]
+    // Consultar si ya existe un bloqueo para este usuario
+    const [result] = await pool.query(
+      "SELECT intentos, intentosReales FROM tblipbloqueados WHERE idUsuarios = ?",
+      [idUsuarios]
     );
-    logger.info(
-      `Registro de bloqueo creado para el usuario con ID ${idUsuarios}`
-    );
-  } else {
-  
-    const bloqueo = result[0];
-    const newAttempts = bloqueo.intentos + 1;
-    const newIntentosReales = bloqueo.intentosReales + 1;
 
-    if (newAttempts >= MAX_FAILED_ATTEMPTS) {
-      const lockUntil = new Date(Date.now() + LOCK_TIME);
+    console.log("Bloqueado23", result);
+
+    if (result.length === 0) {
+      // Si no hay registros, insertamos uno nuevo
       await pool.query(
-        "UPDATE tblipbloqueados SET intentos = ?, intentosReales = ?, fecha = ?, hora = ?, lock_until = ? WHERE idUsuarios = ?",
-        [
-          newAttempts,
-          newIntentosReales,
-          fechaActual,
-          horaActual,
-          lockUntil,
-          idUsuarios,
-        ]
+        "INSERT INTO tblipbloqueados (idUsuarios, ip, fecha, hora, intentos, intentosReales,bloqueado) VALUES (?, ?, ?, ?, ?, ?, ? )",
+        [idUsuarios, ip, fechaActual, horaActual, 1, 1, 0]
       );
       logger.info(
-        `Usuario ${idUsuarios} ha alcanzado el número máximo de intentos. Bloqueado hasta ${lockUntil}`
+        `Registro de bloqueo creado para el usuario con ID ${idUsuarios}`
       );
     } else {
-      await pool.query(
-        "UPDATE tblipbloqueados SET intentos = ?, intentosReales = ?, fecha = ?, hora = ? WHERE idUsuarios = ?",
-        [newAttempts, newIntentosReales, fechaActual, horaActual, idUsuarios]
+      const { intentos, intentosReales } = result[0];
+      const newAttempts = intentos + 1;
+      const newIntentosReales = intentosReales + 1;
+
+      if (newAttempts >= MAX_FAILED_ATTEMPTS) {
+        const lockUntil = new Date(Date.now() + LOCK_TIME);
+        await pool.query(
+          "UPDATE tblipbloqueados SET intentos = ?, intentosReales = ?, fecha = ?, hora = ?, lock_until = ? WHERE idUsuarios = ?",
+          [
+            newAttempts,
+            newIntentosReales,
+            fechaActual,
+            horaActual,
+            lockUntil,
+            idUsuarios,
+          ]
+        );
+        logger.info(
+          `Usuario ${idUsuarios} ha alcanzado el número máximo de intentos. Bloqueado hasta ${lockUntil}`
+        );
+      } else {
+        await pool.query(
+          "UPDATE tblipbloqueados SET intentos = ?, intentosReales = ?, fecha = ?, hora = ? WHERE idUsuarios = ?",
+          [newAttempts, newIntentosReales, fechaActual, horaActual, idUsuarios]
+        );
+        logger.info(
+          `Usuario ${idUsuarios} ha fallado otro intento. Total intentos fallidos: ${newAttempts}`
+        );
+      }
+    }
+    logger.warn(
+      `Intento fallido desde IP: ${ip}  para el usuario con ID ${idUsuarios}`
+    );
+  } catch (error) {
+    if (error.code === "ECONNRESET") {
+      logger.error(
+        `Error de conexión a la base de datos (ECONNRESET) al manejar intento fallido para usuario ${idUsuarios}`
       );
-      logger.info(
-        `Usuario ${idUsuarios} ha fallado otro intento. Total intentos fallidos: ${newAttempts}`
+      throw new Error(
+        "Error de conexión a la base de datos. Por favor, intenta de nuevo más tarde."
       );
     }
+    logger.error(
+      `Error al manejar intento fallido para usuario ${idUsuarios}: ${error.message}`
+    );
+    throw error;
   }
-  logger.warn(
-    `Intento fallido desde IP: ${ip}  para el usuario con ID ${idUsuarios}`
-  );
 }
 
 ///==========================================================================================================================================================================================
@@ -513,33 +486,30 @@ const verifyToken = async (req, res, next) => {
   if (!token) {
     return res.status(403).json({ message: "No tienes token de acceso." });
   }
-
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
-
     const sessionQuery = `
       SELECT * FROM tblsesiones WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
     `;
     const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
-
     if (sessions.length === 0) {
-     
       return res.status(401).json({
-        message: "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
+        message:
+          "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
       });
     }
     req.user = decoded;
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
-      return res.status(401).json({ message: "El token ha expirado. Inicia sesión nuevamente." });
+      return res
+        .status(401)
+        .json({ message: "El token ha expirado. Inicia sesión nuevamente." });
     }
-   
+
     return res.status(500).json({ message: "Error en la autenticación." });
   }
 };
-
-
 
 // Ruta protegida
 usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
@@ -576,7 +546,7 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
     }
 
     const usuario = result[0];
-   
+
     res.json({
       message: "Perfil obtenido correctamente",
       user: {
@@ -595,7 +565,6 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
         fechaCreacion: usuario.fechaCreacion,
       },
     });
-
   } catch (error) {
     console.error("Error al obtener el perfil del usuario:", error);
     res
@@ -607,7 +576,7 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
 //CCERRAMOS SESION
 usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
   const token = req.cookies.sesionToken;
-  const HoraFinal= obtenerFechaMexico();
+  const HoraFinal = obtenerFechaMexico();
   console.log("ESte es el tookie que recibe", token);
   if (!token) {
     return res.status(400).json({ message: "No hay sesión activa." });
@@ -625,7 +594,7 @@ usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
         AND horaFin IS NULL
     `;
 
-    const [result] = await pool.query(query, [ HoraFinal,userId, token]);
+    const [result] = await pool.query(query, [HoraFinal, userId, token]);
 
     if (result.affectedRows === 0) {
       console.warn("⚠️ No se encontró una sesión activa para actualizar.");
@@ -645,58 +614,66 @@ usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
   }
 });
 
-
 //CeRRAR TODAS LAS CESIONES
-usuarioRouter.post("/Delete/login/all-except-current", csrfProtection, async (req, res) => {
-  const token = req.cookies.sesionToken;
-  const HoraFinal= obtenerFechaMexico();
+usuarioRouter.post(
+  "/Delete/login/all-except-current",
+  csrfProtection,
+  async (req, res) => {
+    const token = req.cookies.sesionToken;
+    const HoraFinal = obtenerFechaMexico();
 
-  if (!token) {
-    return res.status(401).json({ message: "No hay sesión activa." });
-  }
+    if (!token) {
+      return res.status(401).json({ message: "No hay sesión activa." });
+    }
 
-  try {
-  
-    const decoded = jwt.verify(token, SECRET_KEY);
-    const userId = decoded.id;
-    const query = `
+    try {
+      const decoded = jwt.verify(token, SECRET_KEY);
+      const userId = decoded.id;
+      const query = `
       UPDATE tblsesiones
       SET horaFin = ?
       WHERE idUsuarios = ? AND horaFin IS NULL AND cookie != ?
     `;
 
-    const [result] = await pool.query(query, [HoraFinal, userId, token]);
+      const [result] = await pool.query(query, [HoraFinal, userId, token]);
 
-    if (result.affectedRows === 0) {
-      console.warn("⚠️ No se encontraron sesiones activas para cerrar (excepto la actual).");
-      return res.status(404).json({ message: "No hay sesiones activas adicionales para cerrar." });
-    } else {
-      console.log(`✅ ${result.affectedRows} sesiones cerradas correctamente.`);
+      if (result.affectedRows === 0) {
+        console.warn(
+          "⚠️ No se encontraron sesiones activas para cerrar (excepto la actual)."
+        );
+        return res
+          .status(404)
+          .json({
+            message: "No hay sesiones activas adicionales para cerrar.",
+          });
+      } else {
+        console.log(
+          `✅ ${result.affectedRows} sesiones cerradas correctamente.`
+        );
+      }
+
+      res.json({
+        message: `Se cerraron ${result.affectedRows} sesiones activas excepto la actual.`,
+      });
+    } catch (error) {
+      console.error("❌ Error al cerrar sesiones:", error);
+      res.status(500).json({ message: "Error interno al cerrar sesiones." });
     }
-
-    res.json({ message: `Se cerraron ${result.affectedRows} sesiones activas excepto la actual.` });
-  } catch (error) {
-    console.error("❌ Error al cerrar sesiones:", error);
-    res.status(500).json({ message: "Error interno al cerrar sesiones." });
   }
-});
+);
 
 //Sesiones
 usuarioRouter.post("/sesiones", csrfProtection, async (req, res) => {
   const { userId } = req.body;
-
-
   if (!userId) {
     return res.status(400).json({ message: "El userId es obligatorio." });
   }
-
   try {
     if (!pool) {
       return res
         .status(500)
         .json({ message: "Error de conexión con la base de datos." });
     }
-
     // Obtener todas las sesiones activas del usuario
     const [sessions] = await pool.query(
       `
@@ -796,7 +773,7 @@ usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
   const userId = req.params.id;
   console.log("perfil", userId);
   const { fotoPerfil } = req.body;
-  const fechaActualizacion= obtenerFechaMexico();
+  const fechaActualizacion = obtenerFechaMexico();
 
   console.log("perfil", fotoPerfil);
   if (!fotoPerfil) {
@@ -818,7 +795,11 @@ usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
     if (updateResult.affectedRows === 0) {
       return res.status(404).json({ message: "Usuario no encontrado." });
     }
-    getIO().emit("actualizacionPerfil", { userId, tipo: "fotoPerfil", fotoPerfil });
+    getIO().emit("actualizacionPerfil", {
+      userId,
+      tipo: "fotoPerfil",
+      fotoPerfil,
+    });
     res.json({
       message: "Foto de perfil actualizada correctamente.",
       fotoPerfil,
@@ -872,8 +853,7 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
       `;
       const [result] = await connection.query(queryPerfil, [value, id]);
       console.log("Resulltado de fecha n", result);
-  
-    
+
       if (result.affectedRows === 0) {
         await connection.rollback();
         return res
@@ -909,11 +889,10 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
 
 //==================================================SOSPECHOSOS
 usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
-  const minIntentosReales = req.query.minIntentos !== undefined 
-    ? parseInt(req.query.minIntentos) 
-    : MAX_FAILED_ATTEMPTS;
-  
-
+  const minIntentosReales =
+    req.query.minIntentos !== undefined
+      ? parseInt(req.query.minIntentos)
+      : MAX_FAILED_ATTEMPTS;
 
   try {
     const [usuarios] = await pool.query(
@@ -934,13 +913,13 @@ usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
 
 usuarioRouter.post("/bloquear/:idUsuario", async (req, res) => {
   const { idUsuario } = req.params;
-  
+
   try {
     await pool.query(
       `UPDATE tblipbloqueados SET bloqueado = TRUE WHERE idUsuarios = ?`,
       [idUsuario]
     );
-    console.log("Usuarios bloqeuado correcatmente ")
+    console.log("Usuarios bloqeuado correcatmente ");
     res.status(200).json({ message: "Usuario bloqueado manualmente." });
   } catch (error) {
     console.error("Error al bloquear usuario:", error);
@@ -963,67 +942,65 @@ usuarioRouter.post("/desbloquear/:idUsuario", async (req, res) => {
   }
 });
 
-usuarioRouter.post("/validarToken/contrasena",csrfProtection, async (req, res, next) => {
-  try {
-    const { correo, token } = req.body;
-    console.log("Datos recibido ", correo , token)
+usuarioRouter.post(
+  "/validarToken/contrasena",
+  csrfProtection,
+  async (req, res, next) => {
+    try {
+      const { correo, token } = req.body;
+      console.log("Datos recibido ", correo, token);
 
-  
-    if (!correo || !token) {
-      return res
-        .status(400)
-        .json({ message: "Correo o token no proporcionado." });
+      if (!correo || !token) {
+        return res
+          .status(400)
+          .json({ message: "Correo o token no proporcionado." });
+      }
+
+      // Buscar el token en la tabla tbltokens
+      const queryToken =
+        "SELECT * FROM tbltokens WHERE correo = ? AND token = ?";
+      const [tokenRecords] = await pool.query(queryToken, [correo, token]);
+      console.log("Este es el resultado del token", tokenRecords);
+
+      if (!tokenRecords.length) {
+        return res
+          .status(400)
+          .json({ message: "Token inválido o no encontrado." });
+      }
+
+      const tokenData = tokenRecords[0];
+
+      // Convertir la fecha de expiración (formato "YYYY-MM-DD HH:mm:ss") a objeto Date
+      const expirationDate = new Date(tokenData.fechaExpiracion);
+      const currentTime = new Date();
+      console.log("Toen exptrado", currentTime);
+      console.log("Expirado desde db", expirationDate);
+
+      if (currentTime > expirationDate) {
+        return res.status(400).json({ message: "El token ha expirado." });
+      }
+
+      console.log(res.status(400), "este es el resultado de envio");
+
+      // Eliminar el token (se corrigió "corrreo" por "correo")
+      const deleteTokenQuery =
+        "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
+      await pool.query(deleteTokenQuery, [correo, token]);
+
+      console.log(res.status(200), "este es el resultado de envio");
+
+      return res.status(200).json({
+        message:
+          "Token válido. Puede proceder con el cambio de contraseña. El token ha sido eliminado.",
+      });
+    } catch (error) {
+      console.error("Error al validar el token:", error);
+      return res.status(500).json({ message: "Error al validar el token." });
     }
-
-    // Buscar el token en la tabla tbltokens
-    const queryToken = "SELECT * FROM tbltokens WHERE correo = ? AND token = ?";
-    const [tokenRecords] = await pool.query(queryToken, [correo, token]);
-    console.log("Este es el resultado del token", tokenRecords)
-
-    if (!tokenRecords.length) {
-      return res
-        .status(400)
-        .json({ message: "Token inválido o no encontrado." });
-    }
-
-    const tokenData = tokenRecords[0];
-
-
-    // Convertir la fecha de expiración (formato "YYYY-MM-DD HH:mm:ss") a objeto Date
-    const expirationDate = new Date(tokenData.fechaExpiracion);
-    const currentTime = new Date();
-    console.log("Toen exptrado", currentTime,)
-    console.log("Expirado desde db",  expirationDate)
-
-    if (currentTime > expirationDate) {
-      return res.status(400).json({ message: "El token ha expirado." });
-    }
-    
-    console.log(res.status(400),"este es el resultado de envio")
-   
-
-    // Eliminar el token (se corrigió "corrreo" por "correo")
-    const deleteTokenQuery = "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
-    await pool.query(deleteTokenQuery, [correo, token]);
-
-    console.log(res.status(200),"este es el resultado de envio")
-
-    return res.status(200).json({
-      message:
-        "Token válido. Puede proceder con el cambio de contraseña. El token ha sido eliminado.",
-    });
-  } catch (error) {
-    console.error("Error al validar el token:", error);
-    return res.status(500).json({ message: "Error al validar el token." });
   }
-});
-;
-
-
-
-usuarioRouter.post("/verify-password",csrfProtection, async (req, res) => {
+);
+usuarioRouter.post("/verify-password", csrfProtection, async (req, res) => {
   const { idUsuario, currentPassword } = req.body;
-
 
   if (!idUsuario || !currentPassword) {
     return res
@@ -1063,9 +1040,9 @@ usuarioRouter.post("/verify-password",csrfProtection, async (req, res) => {
 });
 
 //Cambiar contraseña y  guradarlo en el historial
-usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
+usuarioRouter.post("/change-password", csrfProtection, async (req, res) => {
   const { idUsuario, newPassword } = req.body;
-  console.log("Ide datos usairo",idUsuario, newPassword)
+  console.log("Ide datos usairo", idUsuario, newPassword);
   const token = req.cookies.sesionToken;
 
   if (!idUsuario || !newPassword) {
@@ -1076,7 +1053,7 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
 
   try {
     const now = new Date();
-    const mes = now.getMonth() + 1; 
+    const mes = now.getMonth() + 1;
     const anio = now.getFullYear();
     const [cambiosMes] = await pool.query(
       `SELECT COUNT(*) AS cambios 
@@ -1086,13 +1063,13 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
           AND YEAR(fecha) = ?`,
       [idUsuario, mes, anio]
     );
-    console.log("Datos obtenidos de cabio pass mes", cambiosMes)
+    console.log("Datos obtenidos de cabio pass mes", cambiosMes);
     if (cambiosMes[0].cambios >= 20) {
       return res.status(400).json({
-        message: "Has alcanzado el límite de cambios de contraseña para este mes."
+        message:
+          "Has alcanzado el límite de cambios de contraseña para este mes.",
       });
     }
-
 
     const [historico] = await pool.query(
       "SELECT password FROM tblhistorialpass WHERE idUsuarios = ? ORDER BY created_at DESC",
@@ -1123,15 +1100,13 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
       }
     }
 
-
     const hashedPassword = await argon2.hash(newPassword);
-
 
     await pool.query(
       "UPDATE tblusuarios SET  password= ? WHERE idUsuarios = ?",
       [hashedPassword, idUsuario]
     );
-   const  fechaActual= obtenerFechaMexico();
+    const fechaActual = obtenerFechaMexico();
 
     await pool.query(
       "INSERT INTO tblhistorialpass (idUsuarios, password, created_at) VALUES (?, ?, ?)",
@@ -1144,10 +1119,12 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
     );
 
     if (updatedHistorial.length > 3) {
-      const oldestPasswordId = updatedHistorial[updatedHistorial.length - 1].idhistorialpass;
-      await pool.query("DELETE FROM tblhistorialpass WHERE idhistorialpass = ?", [
-        oldestPasswordId,
-      ]);
+      const oldestPasswordId =
+        updatedHistorial[updatedHistorial.length - 1].idhistorialpass;
+      await pool.query(
+        "DELETE FROM tblhistorialpass WHERE idhistorialpass = ?",
+        [oldestPasswordId]
+      );
     }
 
     await pool.query(
@@ -1155,18 +1132,17 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
       [idUsuario, fechaActual]
     );
 
-    if(token){
-    await pool.query(
-      "UPDATE tblsesiones SET horaFin =? WHERE idUsuarios = ? AND horaFin IS NULL AND cookie !=?",
-      [fechaActual ,idUsuario, token]
-    );
-  }else{
-    await pool.query(
-      "UPDATE tblsesiones SET horaFin =? WHERE idUsuarios = ? AND horaFin IS NULL",
-      [fechaActual ,idUsuario,]
-    );
-  }
-
+    if (token) {
+      await pool.query(
+        "UPDATE tblsesiones SET horaFin =? WHERE idUsuarios = ? AND horaFin IS NULL AND cookie !=?",
+        [fechaActual, idUsuario, token]
+      );
+    } else {
+      await pool.query(
+        "UPDATE tblsesiones SET horaFin =? WHERE idUsuarios = ? AND horaFin IS NULL",
+        [fechaActual, idUsuario]
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -1179,7 +1155,6 @@ usuarioRouter.post("/change-password",csrfProtection, async (req, res) => {
   }
 });
 
-
 //Verifcar el el usaurio solo pueda cambiatr su correo 5 veces * semana
 usuarioRouter.get("/vecesCambioPass", async (req, res) => {
   try {
@@ -1190,9 +1165,9 @@ usuarioRouter.get("/vecesCambioPass", async (req, res) => {
     }
 
     const fechaActual = new Date();
-    const mes = fechaActual.getMonth() + 1; 
-    const anio = fechaActual.getFullYear(); 
-    console.log("Año y mes", mes, anio)
+    const mes = fechaActual.getMonth() + 1;
+    const anio = fechaActual.getFullYear();
+    console.log("Año y mes", mes, anio);
 
     const [cambiosMes] = await pool.query(
       `SELECT COUNT(*) AS cambios 
@@ -1203,27 +1178,25 @@ usuarioRouter.get("/vecesCambioPass", async (req, res) => {
       [idUsuario, mes, anio]
     );
 
-
-    console.log("Cambios paswword", cambiosMes)
+    console.log("Cambios paswword", cambiosMes);
     const totalCambios = cambiosMes[0].cambios;
-    console.log("CAMBIOS TOTAL DE PASSWOR", totalCambios)
+    console.log("CAMBIOS TOTAL DE PASSWOR", totalCambios);
 
     return res.status(200).json({
       idUsuario,
       cambiosRealizados: totalCambios,
       limitePermitido: 20,
       puedeCambiar: totalCambios < 20,
-      message: totalCambios >= 20 
-        ? "Has alcanzado el límite de cambios de contraseña este mes."
-        : "Aún puedes cambiar tu contraseña."
+      message:
+        totalCambios >= 20
+          ? "Has alcanzado el límite de cambios de contraseña este mes."
+          : "Aún puedes cambiar tu contraseña.",
     });
-
   } catch (error) {
     console.error("Error al obtener cambios de contraseña:", error);
     return res.status(500).json({ message: "Error interno del servidor." });
   }
 });
-
 
 usuarioRouter.get("/lista", async (req, res, next) => {
   try {
@@ -1295,8 +1268,6 @@ FROM tblusuarios;
   }
 });
 
-
-
 //=========================================CRONS-JOBS=================================================
 async function verificarYLimpiarNoClientes() {
   let connection;
@@ -1320,17 +1291,18 @@ WHERE p.estado IN ('finalizado', 'cancelado')
       return;
     }
 
-    const idsNoClientes = noClientes.map(nc => nc.idNoClientes);
+    const idsNoClientes = noClientes.map((nc) => nc.idNoClientes);
 
- 
-    await connection.query(`
+    await connection.query(
+      `
       DELETE p, d, nc
       FROM tblpedidos p
       JOIN tbldireccioncliente d ON p.idNoClientes = d.idNoClientes
       JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
       WHERE p.idNoClientes IN (?);
-    `, [idsNoClientes]);
-
+    `,
+      [idsNoClientes]
+    );
 
     console.log(`Eliminados ${idsNoClientes.length} no clientes.`);
     await connection.commit();
@@ -1348,14 +1320,16 @@ WHERE p.estado IN ('finalizado', 'cancelado')
   }
 }
 
-cron.schedule("0 0 * * *", async () => {
-  console.log("Ejecutando verificación y limpieza de no clientes...");
-  await verificarYLimpiarNoClientes();
-  console.log("Verificación y limpieza completada.");
-}, {
-  timezone: "America/Mexico_City"
-});
-
-
+cron.schedule(
+  "0 0 * * *",
+  async () => {
+    console.log("Ejecutando verificación y limpieza de no clientes...");
+    await verificarYLimpiarNoClientes();
+    console.log("Verificación y limpieza completada.");
+  },
+  {
+    timezone: "America/Mexico_City",
+  }
+);
 
 module.exports = usuarioRouter;
