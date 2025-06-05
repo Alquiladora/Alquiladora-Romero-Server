@@ -10,6 +10,15 @@ const now = new Date();
 const crypto = require("crypto");
 const { Console } = require("console");
 const moment = require("moment");
+const dayjs = require('dayjs');
+const utc   = require('dayjs/plugin/utc');
+const tz    = require('dayjs/plugin/timezone');
+
+
+dayjs.extend(utc);
+dayjs.extend(tz);
+
+
 
 produtosRouter.get("/products", async (req, res) => {
   try {
