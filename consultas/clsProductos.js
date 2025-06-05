@@ -1062,7 +1062,7 @@ LEFT JOIN (
     FROM tblfotosproductos
     GROUP BY idProducto
 ) AS fp ON fp.idProducto = pr.idProducto
-WHERE p.fechaInicio = CURDATE()       
+WHERE p.fechaInicio = ?      
   AND p.estado IN ('enviando','entregado','cancelado','Procesando')
 ORDER BY p.idPedido DESC;
     `;
