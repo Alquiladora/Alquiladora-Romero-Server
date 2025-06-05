@@ -1051,8 +1051,8 @@ produtosRouter.get('/hoy', async (req, res) => {
     p.totalPagar,
     d.cantidad,
     d.precioUnitario,
-    pr.nombre,
-    fp.urlFoto
+    pr.nombre As nombreProducto,
+    fp.urlFoto As foto
 FROM tblpedidos AS p
 JOIN tblpedidodetalles     AS d  ON d.idPedido           = p.idPedido
 JOIN tblproductoscolores   AS pc ON pc.idProductoColores = d.idProductoColores
@@ -1090,7 +1090,7 @@ ORDER BY p.idPedido DESC;
 
        pedidosMap.get(r.idRastreo).productos.push({
         nombreProducto: r.nombreProducto,
-        foto:           r.urlFoto,
+        foto:           r.foto,
         cantidad:       r.cantidad,
         precioUnitario: r.precioUnitario
       });
