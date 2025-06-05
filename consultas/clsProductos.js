@@ -1086,11 +1086,11 @@ ORDER BY p.idPedido DESC;
         });
       }
 
-        const fotoPublica = r.foto;
+        const fotoPublica = r.urlFoto;
 
        pedidosMap.get(r.idRastreo).productos.push({
         nombreProducto: r.nombreProducto,
-        foto:           fotoPublica,
+        foto:           r.urlFoto,
         cantidad:       r.cantidad,
         precioUnitario: r.precioUnitario
       });
