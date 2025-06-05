@@ -1047,6 +1047,7 @@ produtosRouter.get('/hoy', async (req, res) => {
     SELECT
     p.idRastreo,
     p.fechaInicio,
+    p.horaAlquiler,
     p.estado,
     p.totalPagar,
     d.cantidad,
@@ -1080,6 +1081,7 @@ ORDER BY p.idPedido DESC;
         pedidosMap.set(r.idRastreo, {
           idRastreo:   r.idRastreo,
           fechaInicio: r.fechaInicio,
+          horaAlquiler: r.horaAlquiler,
           estado:      r.estado,
           totalPagar:  r.totalPagar,
           productos:   []
