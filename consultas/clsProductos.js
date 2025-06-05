@@ -1028,5 +1028,77 @@ FROM tblinventario inv
 });
 
 
+
+//Enpoit Para WearOs
+produtosRouter.get('/hoy', async (req, res) => {
+  try {
+ 
+    const hoy = dayjs().tz('America/Mexico_City').format('YYYY-MM-DD');  
+    const sql = `
+    SELECT
+    p.idRastreo,
+    p.fechaInicio,
+    p.estado,
+    p.totalPagar,
+    d.cantidad,
+    d.precioUnitario,
+    pr.nombre,
+    fp.urlFoto
+FROM tblpedidos AS p
+JOIN tblpedidodetalles     AS d  ON d.idPedido           = p.idPedido
+JOIN tblproductoscolores   AS pc ON pc.idProductoColores = d.idProductoColores
+JOIN tblproductos          AS pr ON pr.idProducto        = pc.idProducto
+LEFT JOIN (
+    SELECT idProducto, MIN(urlFoto) AS urlFoto
+    FROM tblfotosproductos
+    GROUP BY idProducto
+) AS fp ON fp.idProducto = pr.idProducto
+WHERE p.fechaInicio = CURDATE()       
+  AND p.estado IN ('enviando','entregado','cancelado','Procesando')
+ORDER BY p.idPedido DESC;
+    `;
+
+    const [rows] = await pool.query(sql, [hoy]);
+    if (!rows || rows.length === 0) {
+      return res.status(200).json({
+        success: true,
+        pedidos: []    
+      });
+    }
+
+    const pedidosMap = new Map();
+
+    rows.forEach(r => {
+      if (!pedidosMap.has(r.idRastreo)) {
+        pedidosMap.set(r.idRastreo, {
+          idRastreo:   r.idRastreo,
+          fechaInicio: r.fechaInicio,
+          estado:      r.estado,
+          totalPagar:  r.totalPagar,
+          productos:   []
+        });
+      }
+      pedidosMap.get(r.idRastreo).productos.push({
+        nombreProducto: r.nombreProducto,
+        foto:           r.foto,
+        cantidad:       r.cantidad,
+        precioUnitario: r.precioUnitario
+      });
+    });
+
+    res.status(200).json({
+      success: true,
+      pedidos: [...pedidosMap.values()]
+    });
+  } catch (error) {
+    console.error('Error al obtener los pedidos de hoy:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor'
+    });
+  }
+});
+
+
 module.exports = produtosRouter;
 
