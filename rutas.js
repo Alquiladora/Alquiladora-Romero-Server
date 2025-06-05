@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const {csrfProtection} =require('./config/csrf')
-
+const { usuarioRouter } = require('./consultas/clsUsuarios');
 //=========================RUTAS=======================================
 
 // 📌 **Definir Rutas**
 const routes = {
   email: require('./consultas/clsCorreo'),
-  usuarios: require('./consultas/clsUsuarios'),
+  usuarios: usuarioRouter,
   token: require('./consultas/clsToken'),
   auditoria: require('./consultas/clsAuditoria'),
   imagenes: require('./consultas/clsImagenes'),

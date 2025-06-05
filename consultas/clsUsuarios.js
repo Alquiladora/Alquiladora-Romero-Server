@@ -40,32 +40,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 //========================COOKIES================================================
-//Encriptamos el clientId
-function encryptClientId(clientId) {
-  const IV_LENGTH = 16;
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(
-    "aes-256-cbc",
-    Buffer.from(SECRET_KEY, "utf-8"),
-    iv
-  );
-  let encrypted = cipher.update(clientId, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  return iv.toString("hex") + ":" + encrypted;
-}
 
-//DEscribtar el clienteId
-function decryptClientId(encrypted) {
-  const [iv, encryptedText] = encrypted.split(":");
-  const decipher = crypto.createDecipheriv(
-    "aes-256-cbc",
-    SECRET_KEY,
-    Buffer.from(iv, "hex")
-  );
-  let decrypted = decipher.update(encryptedText, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-  return decrypted;
-}
 
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
@@ -257,56 +232,11 @@ usuarioRouter.post("/login", async (req, res, next) => {
 
     //===================================================================================================
 
-    // Verificar si el usuario está bloqueado
-    const [bloqueos] = await pool.query(
-      "SELECT intentos, bloqueado, lock_until FROM tblipbloqueados WHERE idUsuarios = ?",
-      [usuario.idUsuarios]
-    );
-
-    if (bloqueos.length > 0) {
-      const bloqueo = bloqueos[0];
-      const ahora = new Date();
-
-      const lockUntil = bloqueo.lock_until ? new Date(bloqueo.lock_until) : null;
-
-      if (bloqueos.bloqueado === 1) {
-        return res.status(403).json({
-          message: "Cuenta bloqueada por el administrador.",
-        });
-      }
-
-      if (lockUntil && lockUntil <= ahora) {
-        console.log(  "El tiempo de bloqueo ha expirado. Desbloqueando usuario..." );
-
-        await pool.query( ` UPDATE tblipbloqueados SET intentos = 0, lock_until = NULL  WHERE idUsuarios = ?`,
-         [usuario.idUsuarios]);
-       
-        bloqueo.intentos = 0;
-        bloqueo.lock_until = null;
-        console.log(`Usuario ${usuario.idUsuarios} desbloqueado correctamente.`);
-      }else if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
-        if (!lockUntil) {
-          const lockTime = new Date(ahora.getTime() + LOCK_TIME);
-          await pool.query(` UPDATE tblipbloqueados SET lock_until = ? WHERE idUsuarios = ?`,
-             [lockTime, usuario.idUsuarios]);
-          bloqueo.lock_until = lockTime;
-        }
-
-        const tiempoRestanteSegundos = Math.ceil((new Date(bloqueo.lock_until) - ahora) / 1000);
-        const tiempoRestanteMensaje = tiempoRestanteSegundos >= 60
-        ? `${Math.floor(tiempoRestanteSegundos / 60)} minuto${tiempoRestanteSegundos >= 120 ? 's' : ''}${
-            tiempoRestanteSegundos % 60 > 0 ? ` y ${tiempoRestanteSegundos % 60} segundo${tiempoRestanteSegundos % 60 !== 1 ? 's' : ''}` : ''
-          }`
-        : `${tiempoRestanteSegundos} segundo${tiempoRestanteSegundos !== 1 ? 's' : ''}`;
-
-
-        return res.status(403).json({
-          message: `Usuario bloqueado temporalmente. Inténtalo de nuevo en ${tiempoRestanteMensaje}.`,
-          tiempoRestante: tiempoRestanteSegundos,
-        });
-      }
+      // ==== BLOQUEO ====
+    // Si verificarBloqueo envía res, salimos
+    if (await VerificarBloqueo(usuario, res)) {
+      return;
     }
-
     //================================================================================
     // Comparar la contraseña con la base de datos
     const validPassword = await argon2.verify(usuario.password, contrasena);
@@ -403,6 +333,61 @@ usuarioRouter.post("/login", async (req, res, next) => {
   }
 });
 
+
+//=============================FUNCION DE BLOQUEO
+async function VerificarBloqueo(usuario, res) {
+   const [bloqueos] = await pool.query(
+      "SELECT intentos, bloqueado, lock_until FROM tblipbloqueados WHERE idUsuarios = ?",
+      [usuario.idUsuarios]
+    );
+
+    if (bloqueos.length > 0) {
+      const bloqueo = bloqueos[0];
+      const ahora = new Date();
+
+      const lockUntil = bloqueo.lock_until ? new Date(bloqueo.lock_until) : null;
+
+      if (bloqueos.bloqueado === 1) {
+        return res.status(403).json({
+          message: "Cuenta bloqueada por el administrador.",
+        });
+      }
+
+      if (lockUntil && lockUntil <= ahora) {
+        console.log(  "El tiempo de bloqueo ha expirado. Desbloqueando usuario..." );
+
+        await pool.query( ` UPDATE tblipbloqueados SET intentos = 0, lock_until = NULL  WHERE idUsuarios = ?`,
+         [usuario.idUsuarios]);
+       
+        bloqueo.intentos = 0;
+        bloqueo.lock_until = null;
+        console.log(`Usuario ${usuario.idUsuarios} desbloqueado correctamente.`);
+      }else if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
+        if (!lockUntil) {
+          const lockTime = new Date(ahora.getTime() + LOCK_TIME);
+          await pool.query(` UPDATE tblipbloqueados SET lock_until = ? WHERE idUsuarios = ?`,
+             [lockTime, usuario.idUsuarios]);
+          bloqueo.lock_until = lockTime;
+        }
+
+        const tiempoRestanteSegundos = Math.ceil((new Date(bloqueo.lock_until) - ahora) / 1000);
+        const tiempoRestanteMensaje = tiempoRestanteSegundos >= 60
+        ? `${Math.floor(tiempoRestanteSegundos / 60)} minuto${tiempoRestanteSegundos >= 120 ? 's' : ''}${
+            tiempoRestanteSegundos % 60 > 0 ? ` y ${tiempoRestanteSegundos % 60} segundo${tiempoRestanteSegundos % 60 !== 1 ? 's' : ''}` : ''
+          }`
+        : `${tiempoRestanteSegundos} segundo${tiempoRestanteSegundos !== 1 ? 's' : ''}`;
+
+
+        return res.status(403).json({
+          message: `Usuario bloqueado temporalmente. Inténtalo de nuevo en ${tiempoRestanteMensaje}.`,
+          tiempoRestante: tiempoRestanteSegundos,
+        });
+      }
+    }
+
+   return false;
+}
+
 //================================Manejo de intentos fallidos de login=======================================
 async function handleFailedAttempt(ip, idUsuarios, pool) {
   try {
@@ -482,23 +467,39 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //====================Consulta de perfil de usuario========================================================0
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
-  const token = req.cookies.sesionToken;
-  if (!token) {
-    return res.status(403).json({ message: "No tienes token de acceso." });
-  }
-  try {
+
+  try{
+     const token = req.cookies?.sesionToken;
+
+   if (!token) {
+      return res.status(403).json({ message: "Token no proporcionado. Acceso denegado." });
+    }
+  
     const decoded = jwt.verify(token, SECRET_KEY);
+    
     const sessionQuery = `
-      SELECT * FROM tblsesiones WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
+       SELECT 1 FROM tblsesiones 
+      WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
+      LIMIT 1
+      
     `;
+
     const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
+    
     if (sessions.length === 0) {
       return res.status(401).json({
         message:
           "Sesión inválida o expirada. Por favor, inicia sesión nuevamente.",
       });
     }
-    req.user = decoded;
+
+   req.user = {
+      id: decoded.id,
+      nombre: decoded.nombre,
+      rol: decoded.rol,
+    };
+
+
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
@@ -574,7 +575,7 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
 });
 
 //CCERRAMOS SESION
-usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
+usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res) => {
   const token = req.cookies.sesionToken;
   const HoraFinal = obtenerFechaMexico();
   console.log("ESte es el tookie que recibe", token);
@@ -617,7 +618,7 @@ usuarioRouter.post("/Delete/login", csrfProtection, async (req, res) => {
 //CeRRAR TODAS LAS CESIONES
 usuarioRouter.post(
   "/Delete/login/all-except-current",
-  csrfProtection,
+  csrfProtection,verifyToken,
   async (req, res) => {
     const token = req.cookies.sesionToken;
     const HoraFinal = obtenerFechaMexico();
@@ -663,7 +664,7 @@ usuarioRouter.post(
 );
 
 //Sesiones
-usuarioRouter.post("/sesiones", csrfProtection, async (req, res) => {
+usuarioRouter.post("/sesiones", csrfProtection,verifyToken, async (req, res) => {
   const { userId } = req.body;
   if (!userId) {
     return res.status(400).json({ message: "El userId es obligatorio." });
@@ -769,7 +770,7 @@ usuarioRouter.post("/enable-mfa", async (req, res) => {
 
 //============================================================================
 //Actualizamos el foto de perfil
-usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
+usuarioRouter.patch("/perfil/:id/foto",verifyToken, async (req, res) => {
   const userId = req.params.id;
   console.log("perfil", userId);
   const { fotoPerfil } = req.body;
@@ -812,7 +813,7 @@ usuarioRouter.patch("/perfil/:id/foto", async (req, res) => {
 
 //===============================================================================================
 //Actulizar el dato de usaurio en especifico
-usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
+usuarioRouter.patch("/perfil/:id/:field", csrfProtection,verifyToken, async (req, res) => {
   let { id, field } = req.params;
   let { value } = req.body;
 
@@ -888,7 +889,7 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection, async (req, res) => {
 //======================================
 
 //==================================================SOSPECHOSOS
-usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
+usuarioRouter.get("/usuarios-sospechosos",verifyToken, async (req, res) => {
   const minIntentosReales =
     req.query.minIntentos !== undefined
       ? parseInt(req.query.minIntentos)
@@ -911,7 +912,7 @@ usuarioRouter.get("/usuarios-sospechosos", async (req, res) => {
   }
 });
 
-usuarioRouter.post("/bloquear/:idUsuario", async (req, res) => {
+usuarioRouter.post("/bloquear/:idUsuario",verifyToken, async (req, res) => {
   const { idUsuario } = req.params;
 
   try {
@@ -927,7 +928,7 @@ usuarioRouter.post("/bloquear/:idUsuario", async (req, res) => {
   }
 });
 
-usuarioRouter.post("/desbloquear/:idUsuario", async (req, res) => {
+usuarioRouter.post("/desbloquear/:idUsuario",verifyToken, async (req, res) => {
   const { idUsuario } = req.params;
 
   try {
@@ -999,7 +1000,8 @@ usuarioRouter.post(
     }
   }
 );
-usuarioRouter.post("/verify-password", csrfProtection, async (req, res) => {
+
+usuarioRouter.post("/verify-password", csrfProtection,verifyToken, async (req, res) => {
   const { idUsuario, currentPassword } = req.body;
 
   if (!idUsuario || !currentPassword) {
@@ -1040,7 +1042,7 @@ usuarioRouter.post("/verify-password", csrfProtection, async (req, res) => {
 });
 
 //Cambiar contraseña y  guradarlo en el historial
-usuarioRouter.post("/change-password", csrfProtection, async (req, res) => {
+usuarioRouter.post("/change-password", csrfProtection,verifyToken, async (req, res) => {
   const { idUsuario, newPassword } = req.body;
   console.log("Ide datos usairo", idUsuario, newPassword);
   const token = req.cookies.sesionToken;
@@ -1156,7 +1158,7 @@ usuarioRouter.post("/change-password", csrfProtection, async (req, res) => {
 });
 
 //Verifcar el el usaurio solo pueda cambiatr su correo 5 veces * semana
-usuarioRouter.get("/vecesCambioPass", async (req, res) => {
+usuarioRouter.get("/vecesCambioPass",verifyToken, async (req, res) => {
   try {
     const { idUsuario } = req.query;
 
@@ -1198,7 +1200,7 @@ usuarioRouter.get("/vecesCambioPass", async (req, res) => {
   }
 });
 
-usuarioRouter.get("/lista", async (req, res, next) => {
+usuarioRouter.get("/lista",verifyToken, async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
  SELECT 
@@ -1221,7 +1223,7 @@ usuarioRouter.get("/lista", async (req, res, next) => {
   }
 });
 
-usuarioRouter.get("/:idUsuario/sesiones", async (req, res, next) => {
+usuarioRouter.get("/:idUsuario/sesiones",verifyToken, async (req, res, next) => {
   const { idUsuario } = req.params;
   try {
     const [sesiones] = await pool.query(
@@ -1254,7 +1256,7 @@ ORDER BY horaInicio DESC;
 
 //TOTAL DE USARIOS
 
-usuarioRouter.get("/totalUsuarios", async (req, res, next) => {
+usuarioRouter.get("/totalUsuarios",verifyToken, async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
  SELECT COUNT(*) AS totalUsuarios
@@ -1332,4 +1334,4 @@ cron.schedule(
   }
 );
 
-module.exports = usuarioRouter;
+module.exports = {usuarioRouter,verifyToken};

@@ -13,12 +13,14 @@ const { listeners } = require("process");
 const { route } = require("./clssesiones");
 const { getIO, getUserSockets } = require("../config/socket");
 const { Console } = require("console");
+const { verifyToken } = require('./clsUsuarios');
 
 const routerCarrito = express.Router();
 routerCarrito.use(express.json());
 routerCarrito.use(cookieParser());
 
-routerCarrito.get("/carrito/:idUsuario", async (req, res) => {
+
+routerCarrito.get("/carrito/:idUsuario",verifyToken, async (req, res) => {
     const { idUsuario } = req.params;
 
     if (!idUsuario) {
@@ -149,7 +151,7 @@ GROUP BY ca.idCarrito, p.idProducto, pc.idProductoColores, i.idProductoColor;
     }
 });
 
-routerCarrito.post("/agregar", async (req, res) => {
+routerCarrito.post("/agregar",verifyToken, async (req, res) => {
     const { idUsuario, idProductoColor, cantidad, precioAlquiler } = req.body;
 
 
@@ -232,7 +234,7 @@ routerCarrito.post("/agregar", async (req, res) => {
 });
 
 //Contar cuando productos tiene en el carrito 
-routerCarrito.get("/count/:idUsuario", async (req, res) => {
+routerCarrito.get("/count/:idUsuario",verifyToken, async (req, res) => {
     const { idUsuario } = req.params;
     try {
         const [rows] = await pool.query(
@@ -247,7 +249,7 @@ routerCarrito.get("/count/:idUsuario", async (req, res) => {
 });
 
 //Eliminar del carrito
-routerCarrito.delete("/eliminar/:idCarrito", async (req, res) => {
+routerCarrito.delete("/eliminar/:idCarrito",verifyToken, async (req, res) => {
     const { idCarrito } = req.params;
     const {idUsuario}= req.body;
 
@@ -362,7 +364,7 @@ routerCarrito.delete("/eliminar/:idCarrito", async (req, res) => {
 });
 
 //Acatualizar
-routerCarrito.put("/actualizar/:idCarrito", async (req, res) => {
+routerCarrito.put("/actualizar/:idCarrito",verifyToken, async (req, res) => {
     const { idCarrito } = req.params;
     const { cantidad } = req.body;
     let connection;
@@ -534,7 +536,7 @@ const generateNumericTrackingId = () => {
   };
   
 
-  routerCarrito.post("/procesar", csrfProtection, async (req, res) => {
+  routerCarrito.post("/procesar", csrfProtection,verifyToken, async (req, res) => {
     const { userId, total, direccion, metodoPago, rentalDate, returnDate, items } = req.body;
   
     

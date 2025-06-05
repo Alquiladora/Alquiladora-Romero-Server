@@ -21,6 +21,8 @@ module.exports = {
         console.log(`🔗 Nuevo cliente conectado: ${socket.id}`);
 
         const userIdFromQuery = socket.handshake.query.idUsuario;
+        const totalConectados = io.sockets.sockets.size;
+console.log(`Sockets conectados: ${totalConectados}`);
         if (userIdFromQuery) {
           console.log(`✅ Usuario ${userIdFromQuery} conectado desde query con socket ${socket.id}`);
           userSockets[userIdFromQuery] = socket;

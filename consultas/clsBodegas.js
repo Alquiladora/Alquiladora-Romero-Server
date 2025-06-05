@@ -10,10 +10,11 @@ const now = new Date();
 const crypto = require("crypto");
 const { Console } = require("console");
 const moment = require("moment");
+const { verifyToken } = require('./clsUsuarios');
 
 
 
-bodegasRouter.get("/bodegas", async (req, res) => {
+bodegasRouter.get("/bodegas",verifyToken, async (req, res) => {
   try {
     const [rows] = await pool.query(`
    
@@ -31,7 +32,7 @@ SELECT *FROM tblbodegas;
 }); 
 
 
-bodegasRouter.post("/bodegas/crear",csrfProtection, async (req, res) => {
+bodegasRouter.post("/bodegas/crear",csrfProtection,verifyToken, async (req, res) => {
   try {
     const { nombre, ubicacion } = req.body;
 
@@ -79,7 +80,7 @@ bodegasRouter.post("/bodegas/crear",csrfProtection, async (req, res) => {
 
 bodegasRouter.delete(
   "/delete/:id",
-  csrfProtection,
+  csrfProtection,verifyToken,
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -105,7 +106,7 @@ bodegasRouter.delete(
 
 
 
-bodegasRouter.patch("/toggle/:id", csrfProtection, async (req, res) => {
+bodegasRouter.patch("/toggle/:id", csrfProtection,verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -144,7 +145,7 @@ bodegasRouter.patch("/toggle/:id", csrfProtection, async (req, res) => {
 
 
 
-bodegasRouter.patch("/update/:id", csrfProtection, async (req, res) => {
+bodegasRouter.patch("/update/:id", csrfProtection,verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { nombre, ubicacion } = req.body;
