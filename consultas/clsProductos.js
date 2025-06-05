@@ -1068,11 +1068,9 @@ ORDER BY p.idPedido DESC;
     `;
 
     const [rows] = await pool.query(sql, [hoy]);
-    if (!rows || rows.length === 0) {
-      return res.status(200).json({
-        success: true,
-        pedidos: []    
-      });
+
+     if (!rows.length) {
+      return res.status(200).json({ success: true, pedidos: [] });
     }
 
     const pedidosMap = new Map();
@@ -1087,9 +1085,12 @@ ORDER BY p.idPedido DESC;
           productos:   []
         });
       }
-      pedidosMap.get(r.idRastreo).productos.push({
+
+        const fotoPublica = r.foto;
+
+       pedidosMap.get(r.idRastreo).productos.push({
         nombreProducto: r.nombreProducto,
-        foto:           r.foto,
+        foto:           fotoPublica,
         cantidad:       r.cantidad,
         precioUnitario: r.precioUnitario
       });
