@@ -1042,7 +1042,7 @@ usuarioRouter.post("/verify-password", csrfProtection,verifyToken, async (req, r
 });
 
 //Cambiar contraseña y  guradarlo en el historial
-usuarioRouter.post("/change-password", csrfProtection,verifyToken, async (req, res) => {
+usuarioRouter.post("/change-password", csrfProtection, async (req, res) => {
   const { idUsuario, newPassword } = req.body;
   console.log("Ide datos usairo", idUsuario, newPassword);
   const token = req.cookies.sesionToken;
@@ -1334,4 +1334,4 @@ cron.schedule(
   }
 );
 
-module.exports = {usuarioRouter,verifyToken};
+module.exports = {usuarioRouter,verifyToken, obtenerFechaMexico};

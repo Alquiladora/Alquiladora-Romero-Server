@@ -12,6 +12,7 @@ const { getIO } = require("../config/socket");
 const moment = require("moment");
 const { listeners } = require("process");
 const { route } = require("./clssesiones");
+const {obtenerFechaMexico} = require("./clsUsuarios")
 
 const routerPedidos = express.Router();
 routerPedidos.use(express.json());
@@ -126,7 +127,7 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
         SELECT COUNT(*) AS total
         FROM tblpedidos
         WHERE (idUsuarios = ? OR idNoClientes = ?)
-        AND LOWER(estado) IN ('finalizado', 'cancelado')
+        AND LOWER(estadoActual) IN ('Finalizado', 'Cancelado')
         `,
         [idCliente, idCliente]
       );
@@ -222,185 +223,301 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
   });
 
 
+  //Enpot de pagos
+routerPedidos.post("/pagos/registrar", csrfProtection, async (req, res) => {
+  try {
+    const { idPedido, monto, formaPago, metodoPago, detallesPago } = req.body;
+    console.log("Datos recibidos", idPedido);
 
-
-  routerPedidos.get("/pedidos-manuales", csrfProtection, async (req, res) => {
-    try {
-        const query = `
-     
-SELECT 
-    p.idPedido,
-    p.idRastreo,
-    COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
-    COALESCE(u.telefono, d.telefono) AS telefono,
-    CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
-    p.fechaInicio,
-    p.fechaEntrega,
-    TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
-    p.horaAlquiler,
-    p.formaPago,
-    p.totalPagar,
-    p.estado,
-    CASE 
-        WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
-        WHEN nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
-        ELSE 'No cliente'
-    END AS tipoCliente,
-    GROUP_CONCAT(
-        CONCAT(pd.cantidad, 'x ', prod.nombre, ' (', pc.idColor, ') - ', pd.precioUnitario, ' c/u, Subtotal: ', pd.subtotal) 
-        SEPARATOR ' | '
-    ) AS productosAlquilados
-FROM tblpedidos p
-LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
-LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
-LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
-LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
-LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
-LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
-WHERE 
-    (
-        nc.idUsuario IS NULL
-        OR (nc.idUsuario IS NOT NULL AND LOWER(p.estado) NOT IN ('finalizado', 'cancelado'))
-    )
-    AND (p.idUsuarios IS NULL OR LOWER(p.estado) NOT IN ('finalizado', 'cancelado'))
-GROUP BY p.idPedido
-ORDER BY p.fechaRegistro DESC;
-
-
-        `;
-
-        const [results] = await pool.query(query);
-
-        // Format the response
-        const response = results.map(pedido => ({
-            idPedido: pedido.idPedido,
-            idRastreo: pedido.idRastreo,
-            cliente: {
-                nombre: pedido.nombreCliente,
-                telefono: pedido.telefono,
-                direccion: pedido.direccionCompleta,
-                tipoCliente: pedido.tipoCliente
-            },
-            fechas: {
-                inicio: pedido.fechaInicio,
-                entrega: pedido.fechaEntrega,
-                diasAlquiler: pedido.diasAlquiler,
-                horaAlquiler: pedido.horaAlquiler
-            },
-            pago: {
-                formaPago: pedido.formaPago,
-                total: pedido.totalPagar
-            },
-            estado: pedido.estado,
-            productos: pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : []
-        }));
-
-        res.status(200).json({
-            success: true,
-            data: response,
-            total: response.length
-        });
-
-    } catch (error) {
-        console.error('Error fetching manual pedidos:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener los pedidos manuales',
-            error: error.message
-        });
+    if (!idPedido || !monto || !formaPago || !metodoPago) {
+      return res.status(400).json({
+        success: false,
+        message: "Faltan datos requeridos (idPedido, monto, formaPago, metodoPago)",
+      });
     }
+
+    // Buscar un pago pendiente (monto NULL o 0) para ese pedido
+    const [pagosPendientes] = await pool.query(
+      `SELECT idPago FROM tblpagos WHERE idPedido = ? AND (monto IS NULL OR monto = 0) LIMIT 1`,
+      [idPedido]
+    );
+
+    if (pagosPendientes.length > 0) {
+      // Actualizar el primer pago pendiente
+      const idPago = pagosPendientes[0].idPago;
+
+      await pool.query(
+        `UPDATE tblpagos 
+         SET monto = ?, formaPago = ?, metodoPago = ?, detallesPago = ?, estadoPago = 'completado', fechaActualizacion = ? 
+         WHERE idPago = ?`,
+        [monto, formaPago, metodoPago, detallesPago, obtenerFechaMexico(), idPago]
+      );
+
+      return res.json({
+        success: true,
+        message: "Pago actualizado correctamente",
+      });
+    } else {
+      // Insertar nuevo pago (segundo o siguientes pagos)
+      await pool.query(
+        `INSERT INTO tblpagos 
+         (idPedido, monto, formaPago, metodoPago, detallesPago, estadoPago, fechaPago) 
+         VALUES (?, ?, ?, ?, ?, 'completado', ?)`,
+        [idPedido, monto, formaPago, metodoPago, detallesPago, obtenerFechaMexico()]
+      );
+
+      return res.json({
+        success: true,
+        message: "Nuevo pago registrado correctamente",
+      });
+    }
+  } catch (error) {
+    console.error("Error en registrar/actualizar pago:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error interno al registrar el pago",
+      error: error.message,
+    });
+  }
 });
 
 
-routerPedidos.get("/pedidos-general" , csrfProtection, async (req, res) => {
+
+routerPedidos.get("/pedidos-manuales", csrfProtection, async (req, res) => {
   try {
+    const query = `
+      SELECT 
+          p.idPedido,
+          p.idRastreo,
+          COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
+          COALESCE(u.telefono, d.telefono) AS telefono,
+          CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
+          p.fechaInicio,
+          p.fechaEntrega,
+          TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
+          p.totalPagar,
+          p.horaAlquiler,
+          p.estadoActual AS estado, 
+          CASE 
+              WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
+              WHEN nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
+              ELSE 'No cliente'
+          END AS tipoCliente,
+          GROUP_CONCAT(
+              CONCAT(pd.cantidad, 'x ', prod.nombre, ' (', c.color, ') - ', pd.precioUnitario, ' c/u, Subtotal: ', pd.subtotal) 
+              SEPARATOR ' | '
+          ) AS productosAlquilados,
+          
+          pagos.pagosRealizados,
+          pagos.totalPagado,
+          pagos.formaPago
+      FROM tblpedidos p
+      LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
+      LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
+      LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
+      LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
+      LEFT JOIN tblcolores c ON pc.idColor = c.idColores
+      LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
       
-      await pool.query("SET SESSION group_concat_max_len = 1000000;");
-
-      
-      const query = `
+      LEFT JOIN (
           SELECT 
-              p.idPedido,
-              p.idRastreo,
-              COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
-              COALESCE(u.telefono, d.telefono) AS telefono,
-              CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
-              p.fechaInicio,
-              p.fechaEntrega,
-              TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
-              p.horaAlquiler,
-              p.formaPago,
-              p.detallesPago,
-              p.totalPagar,
-              p.estado,
-              p.fechaRegistro,
-              CASE 
-                  WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
-                  WHEN nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
-                  ELSE 'No cliente'
-              END AS tipoCliente,
-              JSON_ARRAYAGG(
-                  JSON_OBJECT(
-                      'cantidad', pd.cantidad,
-                      'nombre', prod.nombre,
-                      'color', c.color,
-                      'precioUnitario', pd.precioUnitario,
-                      'subtotal', pd.subtotal
-                  )
-              ) AS productosAlquilados
-          FROM tblpedidos p
-          LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
-          LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
-          LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
-          LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
-          LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
-          LEFT JOIN tblcolores c ON pc.idColor = c.idColores
-          LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
-          GROUP BY p.idPedido
-          ORDER BY p.fechaRegistro DESC;
-      `;
+              idPedido,
+              GROUP_CONCAT(CONCAT(formaPago, ' / ', metodoPago, ' - $', monto, ' (', estadoPago, ')') SEPARATOR ' | ') AS pagosRealizados,
+              COALESCE(SUM(CASE WHEN estadoPago = 'completado' THEN monto ELSE 0 END), 0) AS totalPagado,
+              SUBSTRING_INDEX(GROUP_CONCAT(formaPago ORDER BY fechaPago DESC), ',', 1) AS formaPago
+          FROM tblpagos
+          GROUP BY idPedido
+      ) pagos ON p.idPedido = pagos.idPedido
 
-      const [results] = await pool.query(query);
+      WHERE 
+          (
+              nc.idUsuario IS NULL
+              OR (nc.idUsuario IS NOT NULL AND LOWER(p.estadoActual) NOT IN ('finalizado', 'cancelado'))
+          )
+          AND (p.idUsuarios IS NULL OR LOWER(p.estadoActual) NOT IN ('finalizado', 'cancelado'))
+      GROUP BY p.idPedido
+      ORDER BY p.fechaRegistro DESC;
+    `;
 
-    
-      const response = results.map(pedido => ({
-          idPedido: pedido.idPedido,
-          idRastreo: pedido.idRastreo,
-          cliente: {
-              nombre: pedido.nombreCliente,
-              telefono: pedido.telefono,
-              direccion: pedido.direccionCompleta,
-              tipoCliente: pedido.tipoCliente
-          },
-          fechas: {
-              inicio: pedido.fechaInicio,
-              entrega: pedido.fechaEntrega,
-              diasAlquiler: pedido.diasAlquiler,
-              horaAlquiler: pedido.horaAlquiler,
-              registro: pedido.fechaRegistro
-          },
-          pago: {
-              formaPago: pedido.formaPago,
-              detalles: pedido.detallesPago,
-              total: pedido.totalPagar
-          },
-          estado: pedido.estado,
-          productos: JSON.parse(pedido.productosAlquilados) 
-      }));
+    const [results] = await pool.query(query);
 
-      res.status(200).json({
-          success: true,
-          data: response,
-          total: response.length
+    const response = results.map(pedido => {
+      const productosStrArray = pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : [];
+      const productosParsed = productosStrArray.map(prodStr => {
+        const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+)$/;
+        const match = prodStr.match(regex);
+
+        if (match) {
+          return {
+            cantidad: parseInt(match[1], 10),
+            nombre: match[2].trim(),
+            color: match[3].trim(),
+            precioUnitario: parseFloat(match[4]),
+            subtotal: parseFloat(match[5]),
+          };
+        } else {
+          return {
+            cantidad: null,
+            nombre: prodStr,
+            color: null,
+            precioUnitario: null,
+            subtotal: null,
+          };
+        }
       });
+
+      const pagosResumen = pedido.pagosRealizados ? pedido.pagosRealizados.split(' | ') : [];
+
+      const estadoPago =
+        parseFloat(pedido.totalPagado) >= parseFloat(pedido.totalPagar)
+          ? 'completado'
+          : parseFloat(pedido.totalPagado) > 0
+          ? 'parcial'
+          : 'pendiente';
+
+      return {
+        idPedido: pedido.idPedido,
+        idRastreo: pedido.idRastreo,
+        cliente: {
+          nombre: pedido.nombreCliente,
+          telefono: pedido.telefono,
+          direccion: pedido.direccionCompleta,
+          tipoCliente: pedido.tipoCliente,
+        },
+        fechas: {
+          inicio: pedido.fechaInicio,
+          entrega: pedido.fechaEntrega,
+          diasAlquiler: pedido.diasAlquiler,
+          horaAlquiler: pedido.horaAlquiler,
+        },
+        pago: {
+          resumen: pagosResumen,
+          totalPagado: parseFloat(pedido.totalPagado),
+          estadoPago: estadoPago,
+          formaPago: pedido.formaPago,
+        },
+        estado: pedido.estado,
+        productos: productosParsed,
+        totalPagar: pedido.totalPagar
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: response,
+      total: response.length
+    });
 
   } catch (error) {
-      console.error("Error al obtener los pedidos generales:", error);
-      res.status(500).json({
-          success: false,
-          message: "Error interno del servidor",
-          error: error.message
-      });
+    console.error('Error fetching manual pedidos:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener los pedidos manuales',
+      error: error.message
+    });
+  }
+});
+
+
+
+routerPedidos.get("/pedidos-general", csrfProtection, async (req, res) => {
+  try {
+    await pool.query("SET SESSION group_concat_max_len = 1000000;");
+
+    const query = `
+      SELECT 
+          p.idPedido,
+          p.idRastreo,
+          COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
+          COALESCE(u.telefono, d.telefono) AS telefono,
+          CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
+          p.fechaInicio,
+          p.fechaEntrega,
+          TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
+          p.horaAlquiler,
+          p.detallesPago,
+          p.totalPagar,
+          p.estadoActual AS estado,
+          p.fechaRegistro,
+          CASE 
+              WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
+              WHEN nc.idNoClientes IS NOT NULL THEN 'Cliente convertido'
+              ELSE 'No cliente'
+          END AS tipoCliente,
+          JSON_ARRAYAGG(
+              JSON_OBJECT(
+                  'cantidad', pd.cantidad,
+                  'nombre', prod.nombre,
+                  'color', c.color,
+                  'precioUnitario', pd.precioUnitario,
+                  'subtotal', pd.subtotal
+              )
+          ) AS productosAlquilados,
+          (
+              SELECT JSON_ARRAYAGG(
+                  JSON_OBJECT(
+                      'formaPago', pg.formaPago,
+                      'metodoPago', pg.metodoPago,
+                      'monto', pg.monto,
+                      'estadoPago', pg.estadoPago,
+                      'fechaPago', DATE_FORMAT(pg.fechaPago, '%Y-%m-%d %H:%i:%s')
+                  )
+              )
+              FROM tblpagos pg
+              WHERE pg.idPedido = p.idPedido
+          ) AS pagos
+      FROM tblpedidos p
+      LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
+      LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
+      LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
+      LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
+      LEFT JOIN tblcolores c ON pc.idColor = c.idColores
+      LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
+      GROUP BY p.idPedido
+      ORDER BY p.fechaRegistro DESC;
+    `;
+
+    const [results] = await pool.query(query);
+
+    const response = results.map((pedido) => ({
+      idPedido: pedido.idPedido,
+      idRastreo: pedido.idRastreo,
+      cliente: {
+        nombre: pedido.nombreCliente,
+        telefono: pedido.telefono,
+        direccion: pedido.direccionCompleta,
+        tipoCliente: pedido.tipoCliente,
+      },
+      fechas: {
+        inicio: pedido.fechaInicio,
+        entrega: pedido.fechaEntrega,
+        diasAlquiler: pedido.diasAlquiler,
+        horaAlquiler: pedido.horaAlquiler,
+        registro: pedido.fechaRegistro,
+      },
+      pago: {
+        detalles: pedido.detallesPago,
+        total: pedido.totalPagar,
+        pagosRealizados: pedido.pagos ? JSON.parse(pedido.pagos) : [],
+      },
+      estado: pedido.estado,
+      productos: pedido.productosAlquilados ? JSON.parse(pedido.productosAlquilados) : [],
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: response,
+      total: response.length,
+    });
+  } catch (error) {
+    console.error("Error al obtener los pedidos generales:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+      error: error.message,
+    });
   }
 });
 
@@ -464,19 +581,8 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
       ORDER BY p.fechaRegistro DESC;
     `;
 
-    const [results] = await pool.query(query, [idUsuarios]);
+    const [results] = await pool.query(query);
 
-  
-    if (results.length === 0) {
-      return res.status(200).json({
-        success: true,
-        data: [],
-        total: 0,
-        message: "No se encontraron pedidos para este cliente.",
-      });
-    }
-
-  
     const response = results.map((pedido) => ({
       idPedido: pedido.idPedido,
       idRastreo: pedido.idRastreo,
@@ -494,12 +600,12 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
         registro: pedido.fechaRegistro,
       },
       pago: {
-        formaPago: pedido.formaPago,
         detalles: pedido.detallesPago,
         total: pedido.totalPagar,
+        pagosRealizados: pedido.pagos ? JSON.parse(pedido.pagos) : [],
       },
       estado: pedido.estado,
-      productos: JSON.parse(pedido.productosAlquilados),
+      productos: pedido.productosAlquilados ? JSON.parse(pedido.productosAlquilados) : [],
     }));
 
     res.status(200).json({
@@ -508,7 +614,7 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
       total: response.length,
     });
   } catch (error) {
-    console.error("Error al obtener los pedidos del cliente:", error);
+    console.error("Error al obtener los pedidos generales:", error);
     res.status(500).json({
       success: false,
       message: "Error interno del servidor",
@@ -516,6 +622,7 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
     });
   }
 });
+
 
 
 
@@ -571,7 +678,7 @@ routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
       `
       SELECT 
         idRastreo,
-        estado,
+        estadoActual As estado,
         fechaInicio,
         fechaEntrega,
         detallesPago

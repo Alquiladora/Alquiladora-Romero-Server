@@ -1048,7 +1048,7 @@ produtosRouter.get('/hoy', async (req, res) => {
     p.idRastreo,
     p.fechaInicio,
     p.horaAlquiler,
-    p.estado,
+    p.estadoActual as estado,
     p.totalPagar,
     d.cantidad,
     d.precioUnitario,
@@ -1064,7 +1064,7 @@ LEFT JOIN (
     GROUP BY idProducto
 ) AS fp ON fp.idProducto = pr.idProducto
 WHERE p.fechaInicio = ?      
-  AND p.estado IN ('enviando','entregado','cancelado','Procesando')
+  AND LOWER(p.estadoActual) IN ('procesando', 'confirmado', 'en alquiler', 'cancelado')
 ORDER BY p.idPedido DESC;
     `;
 
