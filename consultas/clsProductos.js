@@ -1030,18 +1030,21 @@ FROM tblinventario inv
 //Enpoit Para WearOs
 produtosRouter.get('/hoy', async (req, res) => {
   try {
-    // 1. Compute local start of today y start of mañana en America/Mexico_City
-    const nowLocal    = dayjs().tz('America/Mexico_City');
-    const startToday  = nowLocal.startOf('day');           // e.g. 2025-06-17 00:00 local
-    const startTomorrow = startToday.add(1, 'day');        // 2025-06-18 00:00 local
+    // --- 1) Calcula, en tu zona local, los límites de hoy y mañana ---
+    const ahoraLocal     = dayjs().tz('America/Mexico_City');
+    const inicioHoyLocal = ahoraLocal.startOf('day');         // 2025-06-17 00:00 (GMT-6)
+    const inicioMananaLocal = inicioHoyLocal.add(1, 'day');   // 2025-06-18 00:00 (GMT-6)
 
-    // 2. Convertir esos instantes a UTC para la consulta SQL
-    const utcTodayStart     = startToday.utc().format('YYYY-MM-DD HH:mm:ss');
-    const utcTomorrowStart  = startTomorrow.utc().format('YYYY-MM-DD HH:mm:ss');
+    // Convierte esos instantes a UTC para pasarlos a MySQL
+    const desdeUtc = inicioHoyLocal.utc().format('YYYY-MM-DD HH:mm:ss');
+    const ahoraUtc = ahoraLocal.utc().format('YYYY-MM-DD HH:mm:ss');
+    const hastaUtc = inicioMananaLocal.utc().format('YYYY-MM-DD HH:mm:ss');
 
-    console.log('UTC bounds:', utcTodayStart, '->', utcTomorrowStart);
+    console.log('Parámetros UTC:', { desdeUtc, ahoraUtc, hastaUtc });
 
-    // 3. Consulta usando BETWEEN para el rango UTC
+    // --- 2) Consulta única que engloba:
+    //     - Pedidos hoy con horaAlquiler > ahoraLocal
+    //     - Pedidos mañana (cualquier hora)
     const sql = `
       SELECT
         p.idRastreo,
@@ -1062,34 +1065,38 @@ produtosRouter.get('/hoy', async (req, res) => {
         FROM tblfotosproductos
         GROUP BY idProducto
       ) AS fp ON fp.idProducto = pr.idProducto
-      WHERE p.fechaInicio >= ? 
-        AND p.fechaInicio < ?
-        AND LOWER(p.estadoActual) IN (
-          'procesando', 'confirmado', 'enviando', 'en alquiler', 'cancelado'
-        )
+      WHERE LOWER(p.estadoActual) IN (
+        'procesando', 'confirmado', 'enviando', 'en alquiler', 'cancelado'
+      )
+      AND (
+        -- Sub-consulta para Hoy (UTC):
+        (p.fechaInicio >= ? AND p.fechaInicio < ? AND p.horaAlquiler > TIME(?))
+        -- Sub-consulta para Mañana (UTC):
+        OR
+        (p.fechaInicio >= ? AND p.fechaInicio < ?)
+      )
       ORDER BY p.idPedido DESC;
     `;
-    const [rows] = await pool.query(sql, [utcTodayStart, utcTomorrowStart]);
-    console.log('Rows obtenidos:', rows.length);
 
-    // 4. Filtrar por hora local
-    const filtrados = rows.filter(r => {
-      const localDate   = dayjs(r.fechaInicio).tz('America/Mexico_City');
-      const inicioDay   = localDate.startOf('day');
-      const horaAlq     = dayjs(r.horaAlquiler, 'HH:mm:ss').tz('America/Mexico_City');
+    const params = [
+      // Hoy: [desdeUtc, ahoraUtc, ahoraLocal.format('HH:mm:ss')]
+      desdeUtc,     // p.fechaInicio >= inicioHoyLocal UTC
+      ahoraUtc,     // p.fechaInicio <   ahoraLocal UTC
+      ahoraLocal.format('HH:mm:ss'),
 
-      if (inicioDay.isSame(startToday, 'day')) {
-        return horaAlq.isAfter(nowLocal);
-      }
-      // Si cayera en el día de mañana local
-      return inicioDay.isSame(startTomorrow, 'day');
-    });
+      // Mañana: [hastaUtc, nextDayUtc]
+      ahoraUtc,     // reusamos para p.fechaInicio >= ahoraUtc (equivale a inicioMananaLocal UTC también)
+      hastaUtc      // p.fechaInicio <  inicioMananaLocal UTC
+    ];
 
-    // 5. Agrupar por idRastreo
-    const pedidosMap = new Map();
-    filtrados.forEach(r => {
-      if (!pedidosMap.has(r.idRastreo)) {
-        pedidosMap.set(r.idRastreo, {
+    const [rows] = await pool.query(sql, params);
+    console.log('Filas obtenidas tras SQL:', rows.length);
+
+    // --- 3) Agrupa por idRastreo ---
+    const mapPedidos = new Map();
+    rows.forEach(r => {
+      if (!mapPedidos.has(r.idRastreo)) {
+        mapPedidos.set(r.idRastreo, {
           idRastreo:    r.idRastreo,
           fechaInicio:  r.fechaInicio,
           horaAlquiler: r.horaAlquiler,
@@ -1098,7 +1105,7 @@ produtosRouter.get('/hoy', async (req, res) => {
           productos:    []
         });
       }
-      pedidosMap.get(r.idRastreo).productos.push({
+      mapPedidos.get(r.idRastreo).productos.push({
         nombreProducto: r.nombreProducto,
         foto:           r.foto,
         cantidad:       r.cantidad,
@@ -1106,14 +1113,14 @@ produtosRouter.get('/hoy', async (req, res) => {
       });
     });
 
-    // 6. Responder
-    res.status(200).json({
+    // --- 4) Responde ---
+    res.json({
       success: true,
       rangeLocal: {
-        today: startToday.format(),
-        tomorrow: startTomorrow.format()
+        today:    inicioHoyLocal.format(),
+        tomorrow: inicioMananaLocal.format()
       },
-      pedidos: [...pedidosMap.values()]
+      pedidos: [...mapPedidos.values()]
     });
 
   } catch (error) {
