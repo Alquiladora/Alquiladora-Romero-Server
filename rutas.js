@@ -17,7 +17,7 @@ const routes = {
   empresa: require('./consultas/clsEmpresa'),
   politicas: require('./consultas/clsPoliticas'),
   terminos: require('./consultas/clsTerminos'),
-  deslindes: require('./consultas/clsDeslin'),
+  deslin: require('./consultas/clsDeslin'),
   sobreNosotros: require('./consultas/clsSobreNosotros'),
   precios: require('./consultas/clsPrecios'),
   bodegas: require('./consultas/clsBodegas'),
@@ -27,6 +27,7 @@ const routes = {
   carrito: require('./consultas/clsCarrito'),
   colores: require('./consultas/clsColores'),
   horario: require('./consultas/clsHorario'),
+  repartidor: require('./consultas/clsRepartidorPedidos')
 };
 
 

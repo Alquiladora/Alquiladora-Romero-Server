@@ -574,6 +574,43 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
   }
 });
 
+
+//Perfil inicio
+usuarioRouter.get("/perfil-simple", verifyToken, async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const query = `
+      SELECT nombre, fotoPerfil
+      FROM tblusuarios u
+      LEFT JOIN tblperfilusuarios p ON u.idUsuarios = p.idUsuarios
+      WHERE u.idUsuarios = ?;
+    `;
+
+    const [result] = await pool.query(query, [userId]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ message: "Usuario no encontrado." });
+    }
+
+    const usuario = result[0];
+    const nombre = usuario.nombre || "Usuario";
+    const fotoPerfil = usuario.fotoPerfil ||
+      `https://ui-avatars.com/api/?name=${encodeURIComponent(nombre.charAt(0))}`;
+
+    res.json({
+      message: "Datos básicos de perfil obtenidos correctamente",
+      user: {
+        nombre,
+        fotoPerfil,
+      },
+    });
+  } catch (error) {
+    console.error("Error al obtener datos básicos del perfil:", error);
+    res.status(500).json({ message: "Error al obtener datos básicos del perfil." });
+  }
+});
+
+
 //CCERRAMOS SESION
 usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res) => {
   const token = req.cookies.sesionToken;
@@ -1256,11 +1293,46 @@ ORDER BY horaInicio DESC;
 
 //TOTAL DE USARIOS
 
-usuarioRouter.get("/totalUsuarios",verifyToken, async (req, res, next) => {
+usuarioRouter.get("/totalUsuarios", verifyToken, async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
- SELECT COUNT(*) AS totalUsuarios
-FROM tblusuarios;
+SELECT
+  (SELECT COUNT(*) FROM tblusuarios) AS totalUsuarios,
+
+  (SELECT COUNT(DISTINCT p.idPedido)
+   FROM tblpedidos p
+   WHERE LOWER(p.estadoActual) IN (
+     'procesando',
+     'confirmado',
+     'enviando',
+     'en alquiler',
+     'devuelto',
+     'incompleto',
+     'incidente'
+   )
+  ) AS totalRentasActivas,
+
+  (SELECT COALESCE(SUM(pg.monto), 0)
+   FROM tblpedidos p
+   INNER JOIN tblpagos pg ON p.idPedido = pg.idPedido
+   WHERE LOWER(p.estadoActual) IN (
+     'procesando',
+     'confirmado',
+     'enviando',
+     'en alquiler',
+     'devuelto',
+     'incompleto',
+     'incidente'
+   )
+   AND pg.estadoPago = 'completado'
+   AND MONTH(p.fechaInicio) = MONTH(CURRENT_DATE())
+   AND YEAR(p.fechaInicio) = YEAR(CURRENT_DATE())
+  ) AS ingresosMes,
+
+  (SELECT COUNT(*)
+   FROM tblpedidos p
+   WHERE LOWER(p.estadoActual) = 'finalizado'
+  ) AS totalPedidosFinalizados;
     `);
 
     res.json(usuarios);
@@ -1269,6 +1341,89 @@ FROM tblusuarios;
     res.status(500).json({ message: "Error al obtener total de usarios." });
   }
 });
+
+//CAmbiar el rol de usuarios
+usuarioRouter.put('/:userId/rol', csrfProtection, verifyToken, async (req, res) => {
+  const { userId } = req.params;
+  const { rol } = req.body;
+  const rolesValidos = ['administrador', 'cliente', 'repartidor'];
+
+  if (!rolesValidos.includes(rol)) {
+    return res.status(400).json({ message: 'Rol inválido.' });
+  }
+
+  if (req.user.id === Number(userId)) {
+    return res.status(403).json({ message: 'No puedes cambiar tu propio rol.' });
+  }
+
+  try {
+    if (rol === 'repartidor') {
+      const [rows] = await pool.query(
+        'SELECT idRepartidor, activo FROM tblrepartidores WHERE idUsuario = ?',
+        [userId]
+      );
+
+      if (rows.length === 0) {
+        
+        await pool.query(
+          'INSERT INTO tblrepartidores (idUsuario, activo) VALUES (?, 1)',
+          [userId]
+        );
+      } else if (rows[0].activo === 0) {
+      
+        await pool.query(
+          `UPDATE tblrepartidores
+             SET activo = 1,
+                 fechaAlta = CURRENT_TIMESTAMP,
+                 fechaBaja = NULL
+           WHERE idRepartidor = ?`,
+          [rows[0].idRepartidor]
+        );
+      }
+
+      const [result] = await pool.query(
+        'UPDATE tblusuarios SET rol = ? WHERE idUsuarios = ?',
+        [rol, userId]
+      );
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Usuario no encontrado.' });
+      }
+
+      return res.json({ message: 'Usuario ahora es repartidor activo.' });
+    }
+
+    const [rows] = await pool.query(
+      'SELECT idRepartidor, activo FROM tblrepartidores WHERE idUsuario = ?',
+      [userId]
+    );
+    if (rows.length > 0 && rows[0].activo === 1) {
+      
+      return res.status(400).json({
+        message:
+          'No se puede cambiar el rol: el usuario está activo como repartidor hasta que se desactive.',
+      });
+    }
+
+    const [result] = await pool.query(
+      'UPDATE tblusuarios SET rol = ? WHERE idUsuarios = ?',
+      [rol, userId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+ 
+    if (rows.length > 0 && rows[0].activo === 0) {
+      return res.json({ message: 'Repartidor dado de baja: ahora es ' + rol + '.' });
+    }
+
+    return res.json({ message: 'Rol actualizado correctamente.' });
+  } catch (error) {
+    console.error('Error al actualizar rol:', error);
+    return res.status(500).json({ message: 'Error interno al actualizar el rol.' });
+  }
+});
+
 
 //=========================================CRONS-JOBS=================================================
 async function verificarYLimpiarNoClientes() {
@@ -1282,7 +1437,7 @@ async function verificarYLimpiarNoClientes() {
       SELECT DISTINCT nc.idNoClientes
 FROM tblnoclientes nc
 INNER JOIN tblpedidos p ON nc.idNoClientes = p.idNoClientes
-WHERE p.estado IN ('finalizado', 'cancelado')
+WHERE p.estadoActual IN ('Finalizado', 'Cancelado')
   AND p.fechaRegistro < DATE_SUB(NOW(), INTERVAL 1 MONTH)
   AND nc.idUsuario IS NULL;
 

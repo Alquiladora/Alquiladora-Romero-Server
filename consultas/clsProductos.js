@@ -13,6 +13,7 @@ const moment = require("moment");
 const dayjs = require('dayjs');
 const utc   = require('dayjs/plugin/utc');
 const tz    = require('dayjs/plugin/timezone');
+const timezone = require('dayjs/plugin/timezone');
 
 
 dayjs.extend(utc);
@@ -512,49 +513,37 @@ produtosRouter.put("/products/:id", csrfProtection, async (req, res) => {
   }
 });
 
-produtosRouter.delete(
-  "/products/delete/:id",
-  csrfProtection,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
+produtosRouter.delete("/products/delete/:id", csrfProtection, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query("CALL DeleteProductos(?)", [id]);
 
-    
-      const [dependientes] = await pool.query(
-        "SELECT COUNT(*) as count FROM tblpedidodetalles WHERE idProductoColores = ?",
-        [id]
-      );
-
-      if (dependientes[0].count > 0) {
-     
-        return res.status(400).json({
-          success: false,
-          message: `No se puede eliminar el producto porque está asociado a ${dependientes[0].count} pedidos activos.`,
-        });
-      }
-
-    
-      const [result] = await pool.query(`CALL DeleteProductos (?);`, [id]);
-      res.status(201).json({
-        success: true,
-        message: "Producto eliminado correctamente",
-        idProducto: result.insertId,
-      });
-    } catch (error) {
-      console.error("Error al eliminar producto:", error);
-      res.status(500).json({
+    return res.status(200).json({
+      success: true,
+      message: "Producto eliminado correctamente",
+    });
+  } catch (error) {
+    console.error("Error al eliminar producto:", error);
+    if (error.code === "ER_ROW_IS_REFERENCED_2") {
+      return res.status(400).json({
         success: false,
-        message: "Error interno del servidor",
+        message:
+          "No se puede eliminar el producto porque está asociado a otros registros (pedidos, carrito, etc.).",
       });
     }
+    return res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+    });
   }
-);
+});
+
+
 
 //Consulya de los productos pro categroiua
 produtosRouter.get("/categoria/:nombreCategoria", async (req, res) => {
   const { nombreCategoria } = req.params;
   console.log("Parametro recibido", nombreCategoria);
-
   try {
     const sql = `
          SELECT 
@@ -1041,56 +1030,73 @@ FROM tblinventario inv
 //Enpoit Para WearOs
 produtosRouter.get('/hoy', async (req, res) => {
   try {
- 
-    const hoy = dayjs().tz('America/Mexico_City').format('YYYY-MM-DD');  
-    const sql = `
-    SELECT
-    p.idRastreo,
-    p.fechaInicio,
-    p.horaAlquiler,
-    p.estadoActual as estado,
-    p.totalPagar,
-    d.cantidad,
-    d.precioUnitario,
-    pr.nombre As nombreProducto,
-    fp.urlFoto As foto
-FROM tblpedidos AS p
-JOIN tblpedidodetalles     AS d  ON d.idPedido           = p.idPedido
-JOIN tblproductoscolores   AS pc ON pc.idProductoColores = d.idProductoColores
-JOIN tblproductos          AS pr ON pr.idProducto        = pc.idProducto
-LEFT JOIN (
-    SELECT idProducto, MIN(urlFoto) AS urlFoto
-    FROM tblfotosproductos
-    GROUP BY idProducto
-) AS fp ON fp.idProducto = pr.idProducto
-WHERE p.fechaInicio = ?      
-  AND LOWER(p.estadoActual) IN ('procesando', 'confirmado', 'en alquiler', 'cancelado')
-ORDER BY p.idPedido DESC;
-    `;
-
-    const [rows] = await pool.query(sql, [hoy]);
-
-     if (!rows.length) {
-      return res.status(200).json({ success: true, pedidos: [] });
+    // 1. Fechas de hoy y mañana (excluyendo domingo)
+    const now       = dayjs().tz('America/Mexico_City');
+    const hoy       = now.startOf('day');
+    const manana    = hoy.add(1, 'day');
+    const fechas    = [hoy.format('YYYY-MM-DD')];
+    if (manana.day() !== 0) {
+      fechas.push(manana.format('YYYY-MM-DD'));
     }
 
-    const pedidosMap = new Map();
+    // 2. Consulta para ambas fechas
+    const sql = `
+      SELECT
+        p.idRastreo,
+        p.fechaInicio,
+        p.horaAlquiler,
+        p.estadoActual AS estado,
+        p.totalPagar,
+        d.cantidad,
+        d.precioUnitario,
+        pr.nombre      AS nombreProducto,
+        fp.urlFoto     AS foto
+      FROM tblpedidos AS p
+      JOIN tblpedidodetalles   AS d  ON d.idPedido           = p.idPedido
+      JOIN tblproductoscolores AS pc ON pc.idProductoColores = d.idProductoColores
+      JOIN tblproductos        AS pr ON pr.idProducto        = pc.idProducto
+      LEFT JOIN (
+        SELECT idProducto, MIN(urlFoto) AS urlFoto
+        FROM tblfotosproductos
+        GROUP BY idProducto
+      ) AS fp ON fp.idProducto = pr.idProducto
+      WHERE DATE(p.fechaInicio) IN (?)
+        AND LOWER(p.estadoActual) IN ('procesando', 'confirmado','enviando','en alquiler','cancelado')
+      ORDER BY p.idPedido DESC;
+    `;
 
-    rows.forEach(r => {
+    const [rows] = await pool.query(sql, [fechas]);
+
+    // 3. Filtrar según día y hora de alquiler
+    const filtrados = rows.filter(r => {
+      const inicioDate = dayjs(r.fechaInicio).tz('America/Mexico_City').startOf('day');
+      const horaAlq    = dayjs(r.horaAlquiler, 'HH:mm:ss').tz('America/Mexico_City');
+
+      if (inicioDate.isSame(hoy, 'day')) {
+        // hoy: sólo si horaAlquiler > ahora
+        return horaAlq.isAfter(now);
+      }
+      // mañana: siempre
+      if (manana.day() !== 0 && inicioDate.isSame(manana, 'day')) {
+        return true;
+      }
+      return false;
+    });
+
+    // 4. Agrupar pedidos por idRastreo
+    const pedidosMap = new Map();
+    filtrados.forEach(r => {
       if (!pedidosMap.has(r.idRastreo)) {
         pedidosMap.set(r.idRastreo, {
-          idRastreo:   r.idRastreo,
-          fechaInicio: r.fechaInicio,
+          idRastreo:    r.idRastreo,
+          fechaInicio:  r.fechaInicio,
           horaAlquiler: r.horaAlquiler,
-          estado:      r.estado,
-          totalPagar:  r.totalPagar,
-          productos:   []
+          estado:       r.estado,
+          totalPagar:   r.totalPagar,
+          productos:    []
         });
       }
-
-        const fotoPublica = r.urlFoto;
-
-       pedidosMap.get(r.idRastreo).productos.push({
+      pedidosMap.get(r.idRastreo).productos.push({
         nombreProducto: r.nombreProducto,
         foto:           r.foto,
         cantidad:       r.cantidad,
@@ -1098,19 +1104,20 @@ ORDER BY p.idPedido DESC;
       });
     });
 
-    res.status(200).json({
+    // 5. Respuesta
+    return res.status(200).json({
       success: true,
+      fechasConsultadas: fechas,               // ['2025-06-17', '2025-06-18'] por ejemplo
       pedidos: [...pedidosMap.values()]
     });
   } catch (error) {
-    console.error('Error al obtener los pedidos de hoy:', error);
-    res.status(500).json({
+    console.error('Error al obtener los pedidos de hoy y mañana:', error);
+    return res.status(500).json({
       success: false,
       message: 'Error interno del servidor'
     });
   }
 });
-
 
 module.exports = produtosRouter;
 
