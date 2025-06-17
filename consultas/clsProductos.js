@@ -1066,6 +1066,7 @@ produtosRouter.get('/hoy', async (req, res) => {
     `;
 
     const [rows] = await pool.query(sql, [fechas]);
+    console.log("")
 
     // 3. Filtrar según día y hora de alquiler
     const filtrados = rows.filter(r => {
