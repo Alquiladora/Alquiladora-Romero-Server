@@ -1105,12 +1105,15 @@ produtosRouter.get('/hoy', async (req, res) => {
       });
     });
 
+      console.log("Resulatdo a mostrar",[...pedidosMap.values()])
+
     // 5. Respuesta
     return res.status(200).json({
       success: true,
       fechasConsultadas: fechas,               // ['2025-06-17', '2025-06-18'] por ejemplo
       pedidos: [...pedidosMap.values()]
     });
+  
   } catch (error) {
     console.error('Error al obtener los pedidos de hoy y mañana:', error);
     return res.status(500).json({
