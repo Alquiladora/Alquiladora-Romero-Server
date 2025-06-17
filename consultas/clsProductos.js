@@ -1030,16 +1030,18 @@ FROM tblinventario inv
 //Enpoit Para WearOs
 produtosRouter.get('/hoy', async (req, res) => {
   try {
-    // 1. Fechas de hoy y mañana (excluyendo domingo)
-    const now       = dayjs().tz('America/Mexico_City');
-    const hoy       = now.startOf('day');
-    const manana    = hoy.add(1, 'day');
-    const fechas    = [hoy.format('YYYY-MM-DD')];
-    if (manana.day() !== 0) {
-      fechas.push(manana.format('YYYY-MM-DD'));
-    }
+    // 1. Compute local start of today y start of mañana en America/Mexico_City
+    const nowLocal    = dayjs().tz('America/Mexico_City');
+    const startToday  = nowLocal.startOf('day');           // e.g. 2025-06-17 00:00 local
+    const startTomorrow = startToday.add(1, 'day');        // 2025-06-18 00:00 local
 
-    // 2. Consulta para ambas fechas
+    // 2. Convertir esos instantes a UTC para la consulta SQL
+    const utcTodayStart     = startToday.utc().format('YYYY-MM-DD HH:mm:ss');
+    const utcTomorrowStart  = startTomorrow.utc().format('YYYY-MM-DD HH:mm:ss');
+
+    console.log('UTC bounds:', utcTodayStart, '->', utcTomorrowStart);
+
+    // 3. Consulta usando BETWEEN para el rango UTC
     const sql = `
       SELECT
         p.idRastreo,
@@ -1060,31 +1062,30 @@ produtosRouter.get('/hoy', async (req, res) => {
         FROM tblfotosproductos
         GROUP BY idProducto
       ) AS fp ON fp.idProducto = pr.idProducto
-      WHERE DATE(p.fechaInicio) IN (?)
-        AND LOWER(p.estadoActual) IN ('procesando', 'confirmado','enviando','en alquiler','cancelado')
+      WHERE p.fechaInicio >= ? 
+        AND p.fechaInicio < ?
+        AND LOWER(p.estadoActual) IN (
+          'procesando', 'confirmado', 'enviando', 'en alquiler', 'cancelado'
+        )
       ORDER BY p.idPedido DESC;
     `;
+    const [rows] = await pool.query(sql, [utcTodayStart, utcTomorrowStart]);
+    console.log('Rows obtenidos:', rows.length);
 
-    const [rows] = await pool.query(sql, [fechas]);
-    console.log("consulta me obtien est5o ", rows)
-
-    // 3. Filtrar según día y hora de alquiler
+    // 4. Filtrar por hora local
     const filtrados = rows.filter(r => {
-      const inicioDate = dayjs(r.fechaInicio).tz('America/Mexico_City').startOf('day');
-      const horaAlq    = dayjs(r.horaAlquiler, 'HH:mm:ss').tz('America/Mexico_City');
+      const localDate   = dayjs(r.fechaInicio).tz('America/Mexico_City');
+      const inicioDay   = localDate.startOf('day');
+      const horaAlq     = dayjs(r.horaAlquiler, 'HH:mm:ss').tz('America/Mexico_City');
 
-      if (inicioDate.isSame(hoy, 'day')) {
-        // hoy: sólo si horaAlquiler > ahora
-        return horaAlq.isAfter(now);
+      if (inicioDay.isSame(startToday, 'day')) {
+        return horaAlq.isAfter(nowLocal);
       }
-      // mañana: siempre
-      if (manana.day() !== 0 && inicioDate.isSame(manana, 'day')) {
-        return true;
-      }
-      return false;
+      // Si cayera en el día de mañana local
+      return inicioDay.isSame(startTomorrow, 'day');
     });
 
-    // 4. Agrupar pedidos por idRastreo
+    // 5. Agrupar por idRastreo
     const pedidosMap = new Map();
     filtrados.forEach(r => {
       if (!pedidosMap.has(r.idRastreo)) {
@@ -1105,18 +1106,19 @@ produtosRouter.get('/hoy', async (req, res) => {
       });
     });
 
-      console.log("Resulatdo a mostrar",[...pedidosMap.values()])
-
-    // 5. Respuesta
-    return res.status(200).json({
+    // 6. Responder
+    res.status(200).json({
       success: true,
-      fechasConsultadas: fechas,               // ['2025-06-17', '2025-06-18'] por ejemplo
+      rangeLocal: {
+        today: startToday.format(),
+        tomorrow: startTomorrow.format()
+      },
       pedidos: [...pedidosMap.values()]
     });
-  
+
   } catch (error) {
-    console.error('Error al obtener los pedidos de hoy y mañana:', error);
-    return res.status(500).json({
+    console.error('Error al obtener pedidos:', error);
+    res.status(500).json({
       success: false,
       message: 'Error interno del servidor'
     });
