@@ -1425,6 +1425,7 @@ usuarioRouter.put('/:userId/rol', csrfProtection, verifyToken, async (req, res) 
 });
 
 
+
 //=========================================CRONS-JOBS=================================================
 async function verificarYLimpiarNoClientes() {
   let connection;

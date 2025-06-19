@@ -82,6 +82,7 @@ ORDER BY p.idProducto DESC;
   }
 });
 
+
 //Colores
 produtosRouter.get("/colores", async (req, res) => {
   try {
@@ -98,8 +99,6 @@ SELECT *FROM tblcolores;
     });
   }
 });
-
-
 
 
 produtosRouter.get("/bodegas", async (req, res) => {
@@ -1027,7 +1026,7 @@ FROM tblinventario inv
 
 
 
-//Enpoit Para WearOs
+
 produtosRouter.get('/hoy', async (req, res) => {
   try {
     // --- 1) Calcula, en tu zona local, los límites de hoy y mañana ---
