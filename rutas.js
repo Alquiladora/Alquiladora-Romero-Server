@@ -27,7 +27,8 @@ const routes = {
   carrito: require('./consultas/clsCarrito'),
   colores: require('./consultas/clsColores'),
   horario: require('./consultas/clsHorario'),
-  repartidor: require('./consultas/clsRepartidorPedidos')
+  repartidor: require('./consultas/clsRepartidorPedidos'),
+  wearos: require('./consultas/clsWearos')
 };
 
 
@@ -39,9 +40,7 @@ router.get('/get-csrf-token',csrfProtection , (req, res) => {
     router.use(`/${path}`, routeHandler);
   });
 
-//======================================================================
 
-// 📌 **Middleware de Error 404 (Ruta No Encontrada)**
 router.use((req, res) => {
   res.status(404).json({ 
     error: 'Ruta no encontrada', 
@@ -49,7 +48,7 @@ router.use((req, res) => {
   });
 });
 
-// 📌 **Middleware para Capturar Errores en Rutas**
+
 router.use((err, req, res, next) => {
   console.error(`⚠️ Error en ruta ${req.method} ${req.originalUrl}:`, err.stack);
   res.status(500).json({ 

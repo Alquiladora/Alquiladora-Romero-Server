@@ -227,6 +227,9 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
 });
 
 
+
+
+
 routerRepartidorPedidos.get('/wearOs/repartidores', async (req, res) => {
   try {
     const sql = `
