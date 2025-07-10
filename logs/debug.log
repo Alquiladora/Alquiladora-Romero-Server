@@ -1007,3 +1007,82 @@
 {"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 00:33:01"}}
 {"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 00:35:30"}}
 {"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 00:35:30"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 00:43:31"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 00:43:31"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 10:34:36"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 10:34:36"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 14:45:33"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 14:45:33"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 16:10:43"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 16:10:43"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 16:29:14"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 16:29:14"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 16:29:27"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 16:29:27"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 16:32:06"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 16:32:06"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 16:32:28"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 16:32:28"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"connect ECONNABORTED 82.197.82.74:3306","stack":"Error: connect ECONNABORTED 82.197.82.74:3306\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)","timestamp":"2025-07-08 16:55:07"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 17:03:41"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 17:03:41"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-08 17:07:41"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-08 17:07:41"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 03:58:35"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 03:58:35"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:07:13"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:07:13"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:19:23"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:19:23"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:33:00"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:33:00"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:33:44"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:33:44"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:37:08"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:37:08"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:37:20"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:37:20"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 04:46:51"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 04:46:51"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 05:18:20"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 05:18:20"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 05:18:38"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 05:18:38"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 05:20:15"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 05:20:15"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 15:13:44"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 15:13:44"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 15:32:28"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 15:32:28"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 15:37:37"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 15:37:37"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 15:38:02"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 15:38:03"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 19:52:52"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 19:52:52"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 21:24:20"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 21:24:21"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 21:24:26"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 21:24:26"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 21:29:18"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 21:29:18"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-09 23:15:05"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-09 23:15:06"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"connect ECONNABORTED 82.197.82.74:3306","stack":"Error: connect ECONNABORTED 82.197.82.74:3306\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)","timestamp":"2025-07-10 00:30:42"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"connect ETIMEDOUT 82.197.82.74:3306","stack":"Error: connect ETIMEDOUT 82.197.82.74:3306\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)","timestamp":"2025-07-10 00:31:29"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 00:31:51"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 00:31:51"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 00:32:21"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 00:32:22"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 00:34:40"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 00:34:40"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 00:37:28"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 00:37:29"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 00:43:46"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 00:43:46"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 01:00:26"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 01:00:27"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 01:02:59"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 01:02:59"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-07-10 01:05:48"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-07-10 01:05:48"}}

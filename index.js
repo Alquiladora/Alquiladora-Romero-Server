@@ -16,6 +16,8 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(express.json());
+app.use(express.raw({ type: 'application/json' })); 
+app.use(cookieParser());
 
 app.use(helmet({
  
@@ -46,7 +48,6 @@ app.use(helmet({
   ieNoOpen: false,
 }));
 
-app.use(cookieParser());
 
 // Configuración de CORS
 const allowedOrigins = [
@@ -65,7 +66,7 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token','stripe-signature'   ],
   credentials: true,
 }));
 app.options('*', cors());
