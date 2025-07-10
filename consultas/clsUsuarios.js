@@ -280,7 +280,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Crear la cookie de sesión
     res.cookie("sesionToken", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "local",
+      secure: process.env.NODE_ENV === "production",
       sameSite: "None",
       maxAge: TOKEN_EXPIRATION_TIME,
     });
