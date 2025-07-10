@@ -3,10 +3,11 @@ const router = express.Router();
 const { pool } = require('../connectBd');
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 
 
-// 🔐 Función segura para validar y codificar URLs
+
 const getSafeUrl = (envUrl, fallbackPath) => {
   try {
     const encodedPath = encodeURIComponent(fallbackPath);
@@ -21,10 +22,8 @@ const getSafeUrl = (envUrl, fallbackPath) => {
 
 
 // ================== 📩 WEBHOOK DE STRIPE (CORREGIDO Y SEGURO) ==================
-// ================== 📩 WEBHOOK DE STRIPE (POTENCIADO) ==================
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   let event;
 
   try {
@@ -36,14 +35,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
   if (event.type === 'account.updated') {
     const account = event.data.object;
-
-    // ✅ Guarda todos los estados importantes
     const detailsSubmitted = account.details_submitted;
     const chargesEnabled = account.charges_enabled;
     const payoutsEnabled = account.payouts_enabled;
-
     try {
-      // Actualiza tu base de datos con toda la información nueva
       await pool.query(
         `UPDATE tblCuentasReceptoras 
          SET 
@@ -66,29 +61,52 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
 
 
-// ================== 👤 CREAR CUENTA (SIMPLIFICADO) ==================
+// ================== CREAR CUENTA ==================
 router.post('/cuentas', async (req, res) => {
-  const { nombre, banco, notas } = req.body;
-  if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
+  const { nombre, email, banco, notas } = req.body;
+  if (!nombre || !email) {
+    return res.status(400).json({ error: 'El nombre y el email son requeridos' });
+  }
 
   try {
-    const account = await stripe.accounts.create({ /* ... */ });
-    const accountLink = await stripe.accountLinks.create({ /* ... */ });
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: 'MX',
+      email: email, 
+      business_type: 'individual',
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      business_profile: {
+        name: nombre,
+      },
+    });
 
- 
+    // El resto del código no cambia...
+    const accountLink = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: getSafeUrl(process.env.STRIPE_REFRESH_URL, 'gestion_de_pagos'),
+      return_url: getSafeUrl(process.env.STRIPE_RETURN_URL, 'gestion_de_pagos'),
+      type: 'account_onboarding',
+    });
+
     await pool.query(
-      `INSERT INTO tblCuentasReceptoras (stripe_account_id, nombre, banco, notas, onboarding_completed) VALUES (?, ?, ?, ?, ?)`,
-      [account.id, nombre, banco || null, notas || null, 0] // Inicia en 0
+      `INSERT INTO tblCuentasReceptoras (stripe_account_id, nombre, email, banco, notas, onboarding_completed) VALUES (?, ?, ?, ?, ?, ?)`,
+      [account.id, nombre, email, banco || null, notas || null, 0]
     );
 
     res.status(201).json({
-      message: 'Cuenta creada',
+      message: 'Cuenta creada. El usuario debe completar la configuración en Stripe.',
       stripe_account_id: account.id,
-      onboarding_url: accountLink.url
+      onboarding_url: accountLink.url,
     });
-  } catch (error) { /* ... */ }
-});
 
+  } catch (error) {
+    console.error(`[CUENTAS] Error creando cuenta: ${error.message}`);
+    res.status(500).json({ error: 'Error interno al crear la cuenta en Stripe.' });
+  }
+});
 
 
 // ================== 🔗 REGENERAR LINK DE ONBOARDING ==================
@@ -114,8 +132,9 @@ router.post('/cuentas/activar/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
+    // 1. Buscar la cuenta a activar
     const [cuentas] = await pool.query(
-      `SELECT stripe_account_id, onboarding_completed FROM tblCuentasReceptoras WHERE id = ?`,
+      `SELECT id, stripe_account_id, onboarding_completed FROM tblCuentasReceptoras WHERE id = ?`,
       [id]
     );
     if (cuentas.length === 0) return res.status(404).json({ error: 'Cuenta no encontrada' });
@@ -126,15 +145,41 @@ router.post('/cuentas/activar/:id', async (req, res) => {
       return res.status(400).json({ error: 'El onboarding no está completo en Stripe' });
     }
 
+    // 2. Buscar la cuenta que está activa actualmente
+    const [activas] = await pool.query(
+      `SELECT id, stripe_account_id FROM tblCuentasReceptoras WHERE activa = 1 AND id != ?`,
+      [id]
+    );
+
+    // 3. Desactivar en Stripe la cuenta que estaba activa antes (si hay una)
+    for (const cuenta of activas) {
+      await stripe.accounts.update(cuenta.stripe_account_id, {
+        capabilities: {
+          card_payments: { requested: false },
+          transfers: { requested: false }
+        }
+      });
+    }
+
+    // 4. Activar en Stripe esta nueva cuenta
+    await stripe.accounts.update(stripe_account_id, {
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true }
+      }
+    });
+
+    // 5. Actualizar la base de datos
     await pool.query(`UPDATE tblCuentasReceptoras SET activa = 0`);
     await pool.query(`UPDATE tblCuentasReceptoras SET activa = 1 WHERE id = ?`, [id]);
 
-    res.json({ message: 'Cuenta activada' });
+    res.json({ message: 'Cuenta activada correctamente y Stripe actualizado' });
   } catch (err) {
     console.error(`[ACTIVAR] Error activando cuenta: ${err.message}`);
     res.status(500).json({ error: 'Error activando cuenta' });
   }
 });
+
 
 // ================== 🚫 DESACTIVAR CUENTA ==================
 router.post('/cuentas/desactivar/:id', async (req, res) => {
@@ -202,6 +247,7 @@ router.get('/sync-cuentas', async (req, res) => {
   try {
     // 1. Obtiene todas las cuentas de tu base de datos
     const [cuentasLocales] = await pool.query('SELECT stripe_account_id FROM tblCuentasReceptoras');
+    console.log("CUENTAS A SICRONIZAR", cuentasLocales)
     if (cuentasLocales.length === 0) {
       return res.json({ message: 'No hay cuentas para sincronizar.' });
     }
