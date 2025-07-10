@@ -17,50 +17,10 @@ const getSafeUrl = (envUrl, fallbackPath) => {
 };
 
 // ================== 📩 WEBHOOK DE STRIPE ==================
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
 
-  try {
-    // Verifica el evento usando el cuerpo crudo
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    console.log(`[WEBHOOK] ${event.type} recibido - Cuenta: ${event.data.object.id}`);
-  } catch (err) {
-    console.error(`[WEBHOOK] Error validando webhook: ${err.message}`);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Manejo de eventos
-  if (event.type === 'account.updated') {
-    const account = event.data.object;
-    const stripe_account_id = account.id;
-    const onboardingCompleted = account.details_submitted;
-
-    try {
-      // Actualiza el estado de onboarding
-      await pool.query(
-        `UPDATE tblCuentasReceptoras SET onboarding_completed = ? WHERE stripe_account_id = ?`,
-        [onboardingCompleted ? 1 : 0, stripe_account_id]
-      );
-
-      // Actualiza el estado de la cuenta activa
-      if (onboardingCompleted) {
-        await pool.query(`UPDATE tblCuentasReceptoras SET activa = 0`);
-        await pool.query(
-          `UPDATE tblCuentasReceptoras SET activa = 1 WHERE stripe_account_id = ? AND onboarding_completed = 1`,
-          [stripe_account_id]
-        );
-      }
-
-      res.json({ received: true });
-    } catch (dbErr) {
-      console.error(`[WEBHOOK] Error en base de datos: ${dbErr.message}`);
-      res.status(500).json({ error: 'Error en base de datos' });
-    }
-  } else {
-    // Responde a otros eventos no manejados
-    res.json({ received: true });
-  }
+router.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  console.log('[WEBHOOK] Solicitud recibida:', req.body.toString());
+  res.json({ received: true });
 });
 
 // ================== 👤 CREAR CUENTA ==================
