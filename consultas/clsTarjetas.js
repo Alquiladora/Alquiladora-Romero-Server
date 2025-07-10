@@ -11,16 +11,18 @@ const getSafeUrl = (envUrl, fallbackPath) => {
     const url = new URL(envUrl || `http://localhost:3000/administrador?tab=${encodedPath}`);
     return url.toString();
   } catch (err) {
+    console.error(`[URL] Error generando URL segura: ${err.message}`);
     return `http://localhost:3000/administrador?tab=${encodeURIComponent(fallbackPath)}`;
   }
 };
 
 // ================== 📩 WEBHOOK DE STRIPE ==================
-router.post('/webhook', async (req, res) => {
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
+    // Verifica el evento usando el cuerpo crudo
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     console.log(`[WEBHOOK] ${event.type} recibido - Cuenta: ${event.data.object.id}`);
   } catch (err) {
@@ -28,17 +30,20 @@ router.post('/webhook', async (req, res) => {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Manejo de eventos
   if (event.type === 'account.updated') {
     const account = event.data.object;
     const stripe_account_id = account.id;
     const onboardingCompleted = account.details_submitted;
 
     try {
+      // Actualiza el estado de onboarding
       await pool.query(
         `UPDATE tblCuentasReceptoras SET onboarding_completed = ? WHERE stripe_account_id = ?`,
         [onboardingCompleted ? 1 : 0, stripe_account_id]
       );
 
+      // Actualiza el estado de la cuenta activa
       if (onboardingCompleted) {
         await pool.query(`UPDATE tblCuentasReceptoras SET activa = 0`);
         await pool.query(
@@ -49,10 +54,11 @@ router.post('/webhook', async (req, res) => {
 
       res.json({ received: true });
     } catch (dbErr) {
-      console.error(`[WEBHOOK] Error en DB: ${dbErr.message}`);
+      console.error(`[WEBHOOK] Error en base de datos: ${dbErr.message}`);
       res.status(500).json({ error: 'Error en base de datos' });
     }
   } else {
+    // Responde a otros eventos no manejados
     res.json({ received: true });
   }
 });
@@ -63,12 +69,14 @@ router.post('/cuentas', async (req, res) => {
   if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
 
   try {
+    // Crea una cuenta en Stripe
     const account = await stripe.accounts.create({
       type: 'express',
       country: 'MX',
       capabilities: { transfers: { requested: true } },
     });
 
+    // Crea un enlace para el onboarding
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
       refresh_url: getSafeUrl(process.env.STRIPE_REFRESH_URL, 'gestion_de_pagos'),
@@ -76,22 +84,24 @@ router.post('/cuentas', async (req, res) => {
       type: 'account_onboarding',
     });
 
+    // Verifica el estado del onboarding
     const accountDetails = await stripe.accounts.retrieve(account.id);
     const onboardingCompleted = accountDetails.details_submitted;
 
+    // Inserta la cuenta en la base de datos
     await pool.query(
       `INSERT INTO tblCuentasReceptoras (stripe_account_id, nombre, banco, notas, onboarding_completed) VALUES (?, ?, ?, ?, ?)`,
       [account.id, nombre, banco || null, notas || null, onboardingCompleted ? 1 : 0]
     );
 
     res.status(201).json({
-      message: `Cuenta creada`,
+      message: 'Cuenta creada',
       stripe_account_id: account.id,
       onboarding_url: accountLink.url,
       onboarding_completed: onboardingCompleted,
     });
   } catch (error) {
-    console.error(error);
+    console.error(`[CUENTAS] Error creando cuenta: ${error.message}`);
     res.status(500).json({ error: 'Error creando cuenta' });
   }
 });
@@ -99,6 +109,7 @@ router.post('/cuentas', async (req, res) => {
 // ================== 🔗 REGENERAR LINK DE ONBOARDING ==================
 router.get('/cuentas/onboarding-link/:stripe_account_id', async (req, res) => {
   const { stripe_account_id } = req.params;
+
   try {
     const accountLink = await stripe.accountLinks.create({
       account: stripe_account_id,
@@ -108,7 +119,7 @@ router.get('/cuentas/onboarding-link/:stripe_account_id', async (req, res) => {
     });
     res.json({ url: accountLink.url });
   } catch (error) {
-    console.error('Error generando link de onboarding:', error.message);
+    console.error(`[ONBOARDING] Error generando link: ${error.message}`);
     res.status(500).json({ error: 'No se pudo generar el link' });
   }
 });
@@ -124,22 +135,18 @@ router.post('/cuentas/activar/:id', async (req, res) => {
     );
     if (cuentas.length === 0) return res.status(404).json({ error: 'Cuenta no encontrada' });
 
-    const { stripe_account_id } = cuentas[0];
+    const { stripe_account_id, onboarding_completed } = cuentas[0];
 
-    const accountDetails = await stripe.accounts.retrieve(stripe_account_id);
-    if (!accountDetails.details_submitted) {
+    if (!onboarding_completed) {
       return res.status(400).json({ error: 'El onboarding no está completo en Stripe' });
     }
 
     await pool.query(`UPDATE tblCuentasReceptoras SET activa = 0`);
-    const [result] = await pool.query(
-      `UPDATE tblCuentasReceptoras SET activa = 1 WHERE id = ?`,
-      [id]
-    );
+    await pool.query(`UPDATE tblCuentasReceptoras SET activa = 1 WHERE id = ?`, [id]);
 
     res.json({ message: 'Cuenta activada' });
   } catch (err) {
-    console.error(err);
+    console.error(`[ACTIVAR] Error activando cuenta: ${err.message}`);
     res.status(500).json({ error: 'Error activando cuenta' });
   }
 });
@@ -157,7 +164,7 @@ router.post('/cuentas/desactivar/:id', async (req, res) => {
 
     res.json({ message: 'Cuenta desactivada' });
   } catch (err) {
-    console.error(err);
+    console.error(`[DESACTIVAR] Error desactivando cuenta: ${err.message}`);
     res.status(500).json({ error: 'Error desactivando cuenta' });
   }
 });
@@ -185,7 +192,7 @@ router.delete('/cuentas/:id', async (req, res) => {
 
     res.json({ message: 'Cuenta eliminada' });
   } catch (err) {
-    console.error(err);
+    console.error(`[ELIMINAR] Error eliminando cuenta: ${err.message}`);
     res.status(500).json({ error: 'Error eliminando cuenta' });
   }
 });
@@ -198,7 +205,7 @@ router.get('/cuentas', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    console.error(err);
+    console.error(`[LISTAR] Error obteniendo cuentas: ${err.message}`);
     res.status(500).json({ error: 'Error obteniendo cuentas' });
   }
 });
