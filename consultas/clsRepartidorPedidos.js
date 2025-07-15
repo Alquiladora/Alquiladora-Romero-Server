@@ -1541,4 +1541,85 @@ routerRepartidorPedidos.get("/repartidor/todos-pedidos", async (req, res) => {
 });
 
 
+
+// GET: Detalles de un pedido por su ID
+routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => {
+  const { idPedido } = req.params;
+
+  try {
+    // Consulta principal del pedido
+    const [pedido] = await pool.query(
+      `
+      SELECT 
+        p.idPedido,
+        p.estadoActual
+      FROM tblpedidos p
+      INNER JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
+      WHERE p.idPedido = ?
+      LIMIT 1
+      `,
+      [idPedido]
+    );
+
+    if (pedido.length === 0) {
+      return res.status(404).json({ success: false, message: "Pedido no encontrado" });
+    }
+
+    // Consulta de detalles del pedido
+    const [detalles] = await pool.query(
+      `
+      SELECT 
+        pd.idDetalle,
+        pd.cantidad,
+        pd.precioUnitario,
+        pd.diasAlquiler,
+        pd.subtotal,
+        pd.estadoProducto,
+        pd.observaciones,
+        pc.idProductoColores,
+        c.color,
+        pr.idProducto,
+        pr.nombre AS nombreProducto,
+        pr.detalles AS descripcionProducto,
+        pr.material
+      FROM tblpedidodetalles pd
+      INNER JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
+      INNER JOIN tblproductos pr ON pc.idProducto = pr.idProducto
+      INNER JOIN tblcolores c ON pc.idColor = c.idColores
+      WHERE pd.idPedido = ?
+      `,
+      [idPedido]
+    );
+
+    // Estructura de respuesta
+    res.json({
+      success: true,
+      pedido: {
+        idPedido: pedido[0].idPedido,
+        estado: pedido[0].estadoActual,
+        productos: detalles.map((d) => ({
+          idDetalle: d.idDetalle,
+          cantidad: d.cantidad,
+          diasAlquiler: d.diasAlquiler,
+          precioUnitario: d.precioUnitario,
+          subtotal: d.subtotal,
+          estadoProducto: d.estadoProducto,
+          observaciones: d.observaciones,
+          producto: {
+            idProducto: d.idProducto,
+            nombre: d.nombreProducto,
+            descripcion: d.descripcionProducto,
+            material: d.material,
+            color: d.color,
+          },
+        })),
+      },
+    });
+  } catch (err) {
+    console.error("Error al obtener detalles del pedido:", err);
+    res.status(500).json({ success: false, message: "Error interno del servidor" });
+  }
+});
+
+
 module.exports = routerRepartidorPedidos;
