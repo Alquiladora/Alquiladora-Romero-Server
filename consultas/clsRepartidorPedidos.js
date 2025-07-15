@@ -1565,7 +1565,7 @@ routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => 
       return res.status(404).json({ success: false, message: "Pedido no encontrado" });
     }
 
-    // Consulta de detalles del pedido
+    // Consulta de detalles con foto (una por producto)
     const [detalles] = await pool.query(
       `
       SELECT 
@@ -1581,7 +1581,14 @@ routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => 
         pr.idProducto,
         pr.nombre AS nombreProducto,
         pr.detalles AS descripcionProducto,
-        pr.material
+        pr.material,
+        (
+          SELECT fp.urlFoto
+          FROM tblfotosproductos fp
+          WHERE fp.idProducto = pr.idProducto
+          ORDER BY fp.fechaCreacion ASC
+          LIMIT 1
+        ) AS fotoProducto
       FROM tblpedidodetalles pd
       INNER JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
       INNER JOIN tblproductos pr ON pc.idProducto = pr.idProducto
@@ -1611,6 +1618,7 @@ routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => 
             descripcion: d.descripcionProducto,
             material: d.material,
             color: d.color,
+            foto: d.fotoProducto || null
           },
         })),
       },
