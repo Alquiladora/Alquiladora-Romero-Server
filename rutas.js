@@ -29,7 +29,6 @@ const routes = {
   horario: require('./consultas/clsHorario'),
   repartidor: require('./consultas/clsRepartidorPedidos'),
   wearos: require('./consultas/clsWearos'),
-  tarjetas: require('./consultas/clsTarjetas')
 };
 
 

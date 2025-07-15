@@ -20,7 +20,7 @@ auditoriaRouter.use(cookieParser());
 
 
 
-auditoriaRouter.post("/auditoria",csrfProtection,verifyToken, async (req, res) => {
+auditoriaRouter.post("/auditoria",csrfProtection, async (req, res) => {
     const { usuario, correo, accion, dispositivo, ip, detalles } =
       req.body;
       const fecha_hora = new Date().toLocaleString("sv-SE", { timeZone: "America/Mexico_City" });
@@ -52,7 +52,7 @@ auditoriaRouter.post("/auditoria",csrfProtection,verifyToken, async (req, res) =
   });
 
  
-  auditoriaRouter.get("/auditoria/lista",verifyToken, async (req, res) => {
+  auditoriaRouter.get("/auditoria/lista", async (req, res) => {
     try {
       
       const page = parseInt(req.query.page) || 1;

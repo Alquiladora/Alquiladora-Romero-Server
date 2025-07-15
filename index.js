@@ -1,4 +1,4 @@
-require('dotenv').config();
+ require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
@@ -9,6 +9,7 @@ const { init: initSocket } = require('./config/socket');
 const routers = require('./rutas');
 const connect = require('./connectBd');
 const logger = require('./config/logs')
+const tarjetasRouter= require('./consultas/clsTarjetas')
 
 //==================================================
 
@@ -16,8 +17,6 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 
-app.use(express.raw({ type: 'application/json' })); 
-app.use(express.json());
 app.use(cookieParser());
 
 app.use(helmet({
@@ -76,6 +75,9 @@ app.options('*', cors());
 
 
 //=================RUTAS DEFINIDOS=======================
+app.use('/api/tarjetas', tarjetasRouter)
+
+app.use(express.json());
 app.use('/api', routers);
 
 //=======================================================
@@ -127,4 +129,4 @@ startServer();
 module.exports = {
   app,
   server,
-};
+}; 

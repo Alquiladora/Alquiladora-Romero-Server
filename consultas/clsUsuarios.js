@@ -187,6 +187,8 @@ usuarioRouter.post("/login", async (req, res, next) => {
   try {
     const { email, contrasena, tokenMFA, deviceType, captchaToken, ip } =
       req.body;
+
+      console.log("datos recibidos desde login ",email, contrasena, )
     const clientTimestamp = obtenerFechaMexico();
 
     if (!email || !contrasena) {
@@ -248,6 +250,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     }
     //==============================================================MFA ATIVADO=====================
     console.log("Este es e multifactor", usuario.multifaltor);
+    console.log("Datos de tokenMfa", tokenMFA)
 
     if (usuario.multifaltor) {
       if (!tokenMFA) {
@@ -264,12 +267,13 @@ usuarioRouter.post("/login", async (req, res, next) => {
         usuario.multifaltor
       );
 
-      console.log(isValidMFA);
-
+      console.log("Datos a mostra de mfa para validar",isValidMFA);
+      
       if (!isValidMFA) {
         return res.status(400).json({ message: "Código MFA incorrecto." });
       }
     }
+
     // Generar token JWT
     const token = jwt.sign(
       { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol },

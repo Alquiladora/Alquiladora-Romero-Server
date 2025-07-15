@@ -1183,5 +1183,362 @@ routerRepartidorPedidos.get("/repartidores/historial/:idPedido/detalles",  async
 
 
 
+routerRepartidorPedidos.get("/repartidor/datos", verifyToken, csrfProtection, async (req, res) => {
+  try {
+    const idUsuario = req.user?.id ; // ID del usuario autenticado desde el token JWT
+    console.log("Id de datos repartidor:", idUsuario);
+
+    if (!idUsuario) {
+      return res.status(401).json({ error: "ID de usuario no encontrado en el token" });
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT 
+          u.idUsuarios,
+          COALESCE(u.nombre, 'Sin nombre') AS nombre,
+          COALESCE(u.apellidoP, '') AS apellidoP,
+          COALESCE(u.apellidoM, '') AS apellidoM,
+          COALESCE(u.correo, '') AS correo,
+          COALESCE(u.telefono, '') AS telefono,
+          r.idRepartidor,
+          COALESCE(r.activo, 0) AS cuentaActiva,
+          r.fechaAlta,
+          r.fechaBaja,
+          COALESCE(COUNT(DISTINCT CASE WHEN LOWER(p.estadoActual) = 'recogiendo' THEN p.idPedido END), 0) AS totalRecogiendo,
+          COALESCE(COUNT(DISTINCT CASE WHEN LOWER(p.estadoActual) = 'en alquiler' THEN p.idPedido END), 0) AS totalEnAlquiler,
+          COALESCE(COUNT(DISTINCT CASE WHEN LOWER(p.estadoActual) = 'enviando' THEN p.idPedido END), 0) AS totalEnviando,
+          COALESCE(COUNT(DISTINCT CASE WHEN LOWER(p.estadoActual) = 'finalizado' THEN p.idPedido END), 0) AS totalFinalizado,
+          COALESCE(AVG(v.puntuacion), 0) AS promedioValoracion,
+          COALESCE(
+              JSON_ARRAYAGG(
+                  CASE 
+                      WHEN p.estadoActual = 'finalizado' THEN 
+                          JSON_OBJECT(
+                              'mes', CONCAT(MONTHNAME(p.fechaInicio), ' ', YEAR(p.fechaInicio)),
+                              'completados', 1
+                          )
+                  END
+              ), '[]'
+          ) AS pedidosFinalizadosPorMes
+      FROM 
+          tblusuarios u
+      INNER JOIN 
+          tblrepartidores r ON u.idUsuarios = r.idUsuario
+      LEFT JOIN 
+          tblasignacionpedidos ap ON r.idRepartidor = ap.idRepartidor
+      LEFT JOIN 
+          tblpedidos p ON ap.idPedido = p.idPedido
+      LEFT JOIN 
+          tblusuarios c ON p.idUsuarios = c.idUsuarios
+      LEFT JOIN 
+          tblvaloracionesrepartidores v ON ap.idAsignacion = v.idAsignacion
+      WHERE 
+          u.idUsuarios = ?
+      GROUP BY 
+          u.idUsuarios, u.nombre, u.apellidoP, u.apellidoM, u.correo, u.telefono,
+          r.idRepartidor, r.activo, r.fechaAlta, r.fechaBaja
+      `,
+      [idUsuario]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Repartidor no encontrado" });
+    }
+
+    const rawPedidosPorMes = JSON.parse(rows[0].pedidosFinalizadosPorMes || "[]").filter(p => p !== null);
+    const pedidosPorMes = rawPedidosPorMes.reduce((acc, curr) => {
+      const existing = acc.find(item => item.mes === curr.mes);
+      if (existing) {
+        existing.completados += curr.completados;
+      } else {
+        acc.push({ mes: curr.mes, completados: curr.completados });
+      }
+      return acc;
+    }, []);
+
+    const result = {
+      ...rows[0],
+      pedidosFinalizadosPorMes: pedidosPorMes,
+    };
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error fetching repartidor data:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
+
+routerRepartidorPedidos.get('/repartidor/estadisticas',verifyToken, async (req, res) => {
+  try {
+     const idUsuario = req.user?.id ; 
+
+    if (!idUsuario) {
+      return res.status(400).json({ error: 'Falta idUsuario en la petición' });
+    }
+
+    const sql = `
+      SELECT
+        SUM(CASE WHEN LOWER(p.estadoActual) IN ('recogiendo', 'enviando') THEN 1 ELSE 0 END) AS entregasPendientes,
+        SUM(CASE WHEN LOWER(p.estadoActual) = 'finalizado' THEN 1 ELSE 0 END) AS entregasFinalizadas,
+        COUNT(DISTINCT COALESCE(p.idUsuarios, CONCAT('NC-', p.idNoClientes))) AS clientesAtendidos
+      FROM tblrepartidores r
+      INNER JOIN tblasignacionpedidos ap ON r.idRepartidor = ap.idRepartidor
+      INNER JOIN tblpedidos p ON ap.idPedido = p.idPedido
+      WHERE r.idUsuario = ?;
+    `;
+
+    const [rows] = await pool.execute(sql, [idUsuario]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron datos para el repartidor' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error en /repartidor/estadisticas:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
+
+routerRepartidorPedidos.get('/repartidor/pedidos-hoy', verifyToken, async (req, res) => {
+  try {
+    const idUsuario = req.user?.id;
+    if (!idUsuario) {
+      return res.status(400).json({ error: 'Falta idUsuario en la petición' });
+    }
+
+    // Obtener ID de repartidor
+    const [[repartidor]] = await pool.execute(
+      'SELECT idRepartidor FROM tblrepartidores WHERE idUsuario = ?',
+      [idUsuario]
+    );
+
+    if (!repartidor) {
+      return res.status(404).json({ error: 'No se encontró repartidor para este usuario' });
+    }
+
+    const idRepartidor = repartidor.idRepartidor;
+
+    // Obtener fecha actual México en formato YYYY-MM-DD
+    const fechaCompletaMX = obtenerFechaMexico(); // 'YYYY-MM-DD HH:mm:ss'
+    const fechaHoyMX = fechaCompletaMX.split(' ')[0]; // 'YYYY-MM-DD'
+
+    console.log({ idUsuario, idRepartidor, fechaHoyMX });
+
+    const [rows] = await pool.execute(
+      `
+      SELECT 
+        p.idPedido AS id,
+        p.tipoPedido AS tipo_pedido,
+        IFNULL(p.estadoActual, 'sin_estado') AS estado_pedido,
+
+        CASE 
+          WHEN p.idUsuarios IS NOT NULL THEN 
+            CONCAT(u.nombre, ' ', u.apellidoP, ' - Pedido #', p.idPedido)
+          ELSE 
+            CONCAT(nc.nombre, ' ', nc.apellidoCompleto, ' - Pedido #', p.idPedido)
+        END AS descripcion,
+
+        CASE
+          WHEN p.idUsuarios IS NOT NULL THEN 
+            CONCAT(u.nombre, ' ', u.apellidoP)
+          ELSE 
+            CONCAT(nc.nombre, ' ', nc.apellidoCompleto)
+        END AS cliente,
+
+        CASE
+          WHEN p.idUsuarios IS NOT NULL THEN u.telefono
+          ELSE nc.telefono
+        END AS telefono_cliente,
+
+        dc.localidad,
+        dc.municipio,
+        dc.estado,
+        dc.direccion,
+        p.fechaInicio AS fecha_entrega,
+        p.totalPagar AS total_a_pagar,
+        COALESCE(SUM(pg.monto), 0) AS total_pagado,
+        pd.diasAlquiler,
+
+        CASE 
+          WHEN DATE(p.fechaRegistro) = ? AND DATE(p.fechaInicio) = ? THEN TRUE 
+          ELSE FALSE 
+        END AS urgente,
+
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'id'       , pd.idDetalle,
+            'nombre'   , pr.nombre,
+            'cantidad' , pd.cantidad,
+            'precio'   , pd.precioUnitario,
+            'subtotal' , pd.subtotal,
+            'color'    , c.color,
+            'estado'   , pd.estadoProducto,
+            'nota'     , pd.observaciones
+          )
+        ) AS productos
+
+      FROM tblasignacionpedidos ap
+      JOIN tblpedidos p ON ap.idPedido = p.idPedido
+      JOIN tbldireccioncliente dc ON p.idDireccion = dc.idDireccion
+      LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
+      LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      LEFT JOIN tblpagos pg ON p.idPedido = pg.idPedido AND pg.estadoPago = 'completado'
+      LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
+      LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
+      LEFT JOIN tblproductos pr ON pc.idProducto = pr.idProducto
+      LEFT JOIN tblcolores c ON pc.idColor = c.idColores
+
+      WHERE ap.idRepartidor = (
+        SELECT idRepartidor FROM tblrepartidores WHERE idUsuario = ?
+      )
+        AND LOWER(p.estadoActual) IN ('enviando','recogiendo')
+    
+
+      GROUP BY p.idPedido
+      ORDER BY urgente DESC, p.idPedido
+      `,
+      [fechaHoyMX, fechaHoyMX, idUsuario]
+    );
+
+    const pedidos = rows.map(row => ({
+      ...row,
+      productos: JSON.parse(row.productos)
+    }));
+
+    res.json({
+      fechaConsulta: fechaHoyMX,
+      repartidor: idRepartidor,
+      totalPedidos: pedidos.length,
+      pedidos
+    });
+
+  } catch (error) {
+    console.error('Error en /repartidor/pedidos-hoy:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
+
+//------------------------ENPOIT ALEXA-------------
+routerRepartidorPedidos.get("/repartidor/todos-pedidos", async (req, res) => {
+  try {
+    const today = moment().tz("America/Mexico_City").startOf("day").format("YYYY-MM-DD");
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        p.idPedido,
+        p.idUsuarios,
+        p.idNoClientes,
+        p.idRastreo,
+        p.estadoActual,
+        p.tipoPedido,
+        p.totalPagar,
+        COALESCE(SUM(pg.monto), 0) AS totalPagado,
+        (COALESCE(SUM(pg.monto), 0) >= p.totalPagar) AS isFullyPaid,
+        p.fechaInicio,
+        p.fechaEntrega,
+        p.horaAlquiler,
+        p.fechaRegistro,
+
+        d.idDireccion,
+        d.nombre,
+        d.apellido,
+        d.telefono,
+        d.codigoPostal,
+        d.estado AS direccionEstado,
+        d.municipio,
+        d.localidad,
+        d.direccion,
+        d.referencias,
+
+        ap.idAsignacion,
+        ap.idRepartidor AS asignacion_idRepartidor,
+        ap.fechaAsignacion,
+
+        r.idRepartidor,
+        u.nombre AS nombreRepartidor,
+        u.apellidoP AS apellidoPRepartidor,
+        u.apellidoM AS apellidoMRepartidor,
+        u.telefono AS telefonoRepartidor
+
+      FROM tblpedidos p
+      LEFT JOIN tblpagos pg ON p.idPedido = pg.idPedido
+      INNER JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
+      LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
+      LEFT JOIN tblrepartidores r ON ap.idRepartidor = r.idRepartidor
+      LEFT JOIN tblusuarios u ON r.idUsuario = u.idUsuarios
+
+      WHERE (
+        LOWER(p.estadoActual) IN ('confirmado', 'enviando')
+        AND DATE(CONVERT_TZ(p.fechaInicio, '+00:00', '-06:00')) >= ?
+      )
+
+      GROUP BY p.idPedido
+      ORDER BY p.fechaInicio ASC
+      `,
+      [today]
+    );
+
+    const pedidos = rows.map((p) => ({
+      idPedido: p.idPedido,
+      idRastreo: p.idRastreo,
+      estado: p.estadoActual,
+      tipoPedido: p.tipoPedido,
+      totalPagar: p.totalPagar,
+      totalPagado: p.totalPagado,
+      isFullyPaid: !!p.isFullyPaid,
+      fechaInicio: moment(p.fechaInicio).tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss"),
+      fechaEntrega: moment(p.fechaEntrega).tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss"),
+      horaAlquiler: p.horaAlquiler,
+      fechaRegistro: moment(p.fechaRegistro).tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss"),
+
+      direccion: {
+        idDireccion: p.idDireccion,
+        nombre: p.nombre,
+        apellido: p.apellido,
+        telefono: p.telefono,
+        codigoPostal: p.codigoPostal,
+        estado: p.direccionEstado,
+        municipio: p.municipio,
+        localidad: p.localidad,
+        direccion: p.direccion,
+        referencias: p.referencias,
+      },
+
+      asignado: !!p.idAsignacion,
+      esClienteRegistrado: p.idUsuarios !== null,
+
+      repartidor: p.idRepartidor
+        ? {
+            idRepartidor: p.idRepartidor,
+            nombre: p.nombreRepartidor,
+            apellidoP: p.apellidoPRepartidor,
+            apellidoM: p.apellidoMRepartidor,
+            telefono: p.telefonoRepartidor,
+            fechaAsignacion: moment(p.fechaAsignacion).tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss"),
+          }
+        : null,
+    }));
+
+    res.json({
+      success: true,
+      pedidos,
+    });
+  } catch (err) {
+    console.error("Error al obtener todos los pedidos:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error interno al obtener pedidos",
+    });
+  }
+});
+
 
 module.exports = routerRepartidorPedidos;
