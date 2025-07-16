@@ -85,16 +85,22 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
         lineItems, 
         trackingId
       } = req.body;
+
+
+      console.log("DATOS RECIBIDOS", esClienteExistente, selectedDireccionId)
   
    
       let crearDireccion = 0;
       let idDireccionExistente = null;
+
       if (!selectedDireccionId) {
         crearDireccion = 1;
       } else {
         crearDireccion = 0;
         idDireccionExistente = selectedDireccionId;
       }
+
+      console.log("dirrecion crear", crearDireccion)
   
 
        const currentDateTime = moment()
@@ -103,34 +109,73 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
 
       let idCliente = null;
 
-      if (esClienteExistente) {
-        const [clienteRows] = await pool.query(
-          "SELECT idNoClientes AS id FROM tblnoclientes WHERE correo = ? OR telefono = ? LIMIT 1",
-            [correo,telefono]
-        );
+   let correoValido = correo && correo.trim() !== "" ? correo.trim() : null;
+let telefonoValido = telefono && telefono.trim() !== "" ? telefono.trim() : null;
+
+if (esClienteExistente) {
+    let query = "SELECT idNoClientes AS id FROM tblnoclientes WHERE ";
+    let params = [];
+
+    if (correoValido && telefonoValido) {
+        query += "(correo = ? OR telefono = ?)";
+        params = [correoValido, telefonoValido];
+    } else if (correoValido) {
+        query += "correo = ?";
+        params = [correoValido];
+    } else if (telefonoValido) {
+        query += "telefono = ?";
+        params = [telefonoValido];
+    } else {
+        console.log("❌ No hay correo ni teléfono válidos para buscar cliente existente");
+    }
+
+    if (params.length > 0) {
+        const [clienteRows] = await pool.query(query + " LIMIT 1", params);
         if (clienteRows.length > 0) {
             idCliente = clienteRows[0].id;
         }
+    }
+} else {
+    let query = "SELECT idNoClientes AS id FROM tblnoclientes WHERE ";
+    let params = [];
+
+    if (correoValido && telefonoValido) {
+        query += "(correo = ? OR telefono = ?)";
+        params = [correoValido, telefonoValido];
+    } else if (correoValido) {
+        query += "correo = ?";
+        params = [correoValido];
+    } else if (telefonoValido) {
+        query += "telefono = ?";
+        params = [telefonoValido];
     } else {
-        const [noClienteRows] = await pool.query(
-            "SELECT idNoClientes AS id FROM tblnoclientes WHERE correo = ?  OR telefono = ? LIMIT 1",
-            [correo,telefono]
-        );
+        console.log("❌ No hay datos válidos para buscar no cliente");
+    }
+
+    if (params.length > 0) {
+        const [noClienteRows] = await pool.query(query + " LIMIT 1", params);
+        console.log("🔎 Datos recibidos de no cliente (no es cliente registrado):", noClienteRows);
         if (noClienteRows.length > 0) {
             idCliente = noClienteRows[0].id;
         }
     }
+}
 
+
+    
+    
     if (idCliente) {
       const [pedidosActivos] = await pool.query(
         `
         SELECT COUNT(*) AS total
         FROM tblpedidos
         WHERE (idUsuarios = ? OR idNoClientes = ?)
-        AND LOWER(estadoActual) IN ('Finalizado', 'Cancelado')
+        AND LOWER(estadoActual) NOT IN ('Finalizado', 'Cancelado')
         `,
         [idCliente, idCliente]
       );
+
+      console.log("pedidos activos", pedidosActivos)
       
         if (pedidosActivos[0].total >= 5) {
             return res.status(400).json({
@@ -139,6 +184,9 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
             });
         }
     }
+
+   
+
       const query = `
       CALL sp_crearPedidoBasico(
         ?, ?, ?, ?, ?,       
@@ -171,11 +219,21 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
         trackingId,
         currentDateTime
       ];
+
+  
+
+
+       console.log("datos de cls sp_crearpedido basico",values )
   
       const [rows] = await pool.query(query, values);
+      console.log("datos recibidos", rows)
       
       const result = rows[0][0];
+
+      console.log("resulatdos de resultados", result)
+
       const newIdPedido = result.newIdPedido;
+       console.log("resulatdos de newIdPedido", newIdPedido)
   
       
       for (const item of lineItems) {
@@ -223,11 +281,14 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
   });
 
 
+
+
+
   //Enpot de pagos
 routerPedidos.post("/pagos/registrar", csrfProtection, async (req, res) => {
   try {
     const { idPedido, monto, formaPago, metodoPago, detallesPago } = req.body;
-    console.log("Datos recibidos", idPedido);
+    console.log("Datos recibidos pagos", idPedido);
 
     if (!idPedido || !monto || !formaPago || !metodoPago) {
       return res.status(400).json({
@@ -666,149 +727,64 @@ routerPedidos.get("/check-id-rastreo/:idRastreo", csrfProtection, async (req, re
 
 
 
-routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
-  const { idRastreo } = req.params;
 
+
+routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
   try {
-    // Query to fetch the order details from tblpedidos
+    const { idRastreo } = req.params;
+
+    // Validar idRastreo
+    if (!idRastreo) {
+      return res.status(400).json({
+        success: false,
+        message: "ID de rastreo inválido",
+      });
+    }
+
+    // Obtener idPedido y estado actual
     const [orders] = await pool.query(
       `
       SELECT 
+        idPedido,
         idRastreo,
-        estadoActual As estado,
+        CONCAT(UCASE(LEFT(estadoActual,1)), LCASE(SUBSTRING(estadoActual,2))) AS estado,
         fechaInicio,
         fechaEntrega,
         detallesPago
-      FROM 
-        tblpedidos
-      WHERE 
-        idRastreo = ?
+      FROM tblpedidos
+      WHERE idRastreo = ?
       `,
       [idRastreo]
     );
 
     if (orders.length === 0) {
-      return res.status(404).json({ message: "No se encontró un pedido con ese ID de rastreo." });
+      return res.status(404).json({
+        success: false,
+        message: "No se encontró un pedido con ese ID de rastreo",
+      });
     }
 
     const order = orders[0];
 
-    const history = [];
-    const baseDate = new Date(order.fechaInicio);
-    const deliveryDate = new Date(order.fechaEntrega);
+    // Consultar historial en tblhistorialestados
+    const [historyRows] = await pool.query(
+      `
+      SELECT 
+        CONCAT(UCASE(LEFT(estadoNuevo,1)), LCASE(SUBSTRING(estadoNuevo,2))) AS state,
+        DATE_FORMAT(fechaActualizacion, '%Y-%m-%d %H:%i:%s') AS date,
+        CONCAT('El pedido cambió a ', CONCAT(UCASE(LEFT(estadoNuevo,1)), LCASE(SUBSTRING(estadoNuevo,2))), 
+               COALESCE(CONCAT(' desde ', CONCAT(UCASE(LEFT(estadoAnterior,1)), LCASE(SUBSTRING(estadoAnterior,2)))), '')) AS description
+      FROM tblhistorialestados
+      WHERE idPedido = ?
+      ORDER BY fechaActualizacion ASC
+      `,
+      [order.idPedido]
+    );
 
-    // Helper function to format dates
-    const formatDate = (date) => {
-      return date.toLocaleString("en-US", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-    };
+    // Si no hay historial, devolver array vacío
+    const history = historyRows.length > 0 ? historyRows : [];
 
-    // Add "Procesando" as the initial state
-    history.push({
-      state: "Procesando",
-      date: formatDate(baseDate),
-      description: "Estamos preparando tu pedido para el envío.",
-    });
-
-    // Add "Confirmado" (1 hour after Procesando)
-    const confirmadoDate = new Date(baseDate.getTime() + 60 * 60 * 1000);
-    history.push({
-      state: "Confirmado",
-      date: formatDate(confirmadoDate),
-      description: "Tu pedido ha sido confirmado y está listo para enviarse.",
-    });
-
-    // Add "Enviando" (2 hours after Procesando)
-    const enviandoDate = new Date(baseDate.getTime() + 2 * 60 * 60 * 1000);
-    history.push({
-      state: "Enviando",
-      date: formatDate(enviandoDate),
-      description: "El pedido ha sido enviado y está en camino.",
-    });
-
-    // Add "Entregado" (at fechaEntrega)
-    history.push({
-      state: "Entregado",
-      date: formatDate(deliveryDate),
-      description: "El pedido ha sido entregado exitosamente.",
-    });
-
-    // Add additional states based on the current estado
-    if (order.estado === "En Alquiler") {
-      const enAlquilerDate = new Date(deliveryDate.getTime() + 1 * 60 * 60 * 1000);
-      history.push({
-        state: "En Alquiler",
-        date: formatDate(enAlquilerDate),
-        description: "El producto está en uso por el cliente.",
-      });
-    } else if (order.estado === "Incompleto") {
-      const enAlquilerDate = new Date(deliveryDate.getTime() + 1 * 60 * 60 * 1000);
-      history.push({
-        state: "En Alquiler",
-        date: formatDate(enAlquilerDate),
-        description: "El producto está en uso por el cliente.",
-      });
-      const incompletoDate = new Date(deliveryDate.getTime() + 24 * 60 * 60 * 1000);
-      history.push({
-        state: "Incompleto",
-        date: formatDate(incompletoDate),
-        description: "El producto fue devuelto, pero falta un elemento.",
-      });
-    } else if (order.estado === "Incidencia") {
-      const enAlquilerDate = new Date(deliveryDate.getTime() + 1 * 60 * 60 * 1000);
-      history.push({
-        state: "En Alquiler",
-        date: formatDate(enAlquilerDate),
-        description: "El producto está en uso por el cliente.",
-      });
-      const incidenciaDate = new Date(deliveryDate.getTime() + 24 * 60 * 60 * 1000);
-      history.push({
-        state: "Incidencia",
-        date: formatDate(incidenciaDate),
-        description: order.detallesPago || "Se reportó un problema con el pedido.",
-      });
-    } else if (order.estado === "Devuelto") {
-      const enAlquilerDate = new Date(deliveryDate.getTime() + 1 * 60 * 60 * 1000);
-      history.push({
-        state: "En Alquiler",
-        date: formatDate(enAlquilerDate),
-        description: "El producto está en uso por el cliente.",
-      });
-      const devueltoDate = new Date(deliveryDate.getTime() + 24 * 60 * 60 * 1000);
-      history.push({
-        state: "Devuelto",
-        date: formatDate(devueltoDate),
-        description: "El producto ha sido devuelto exitosamente.",
-      });
-    } else if (order.estado === "Finalizado") {
-      const enAlquilerDate = new Date(deliveryDate.getTime() + 1 * 60 * 60 * 1000);
-      history.push({
-        state: "En Alquiler",
-        date: formatDate(enAlquilerDate),
-        description: "El producto está en uso por el cliente.",
-      });
-      const finalizadoDate = new Date(deliveryDate.getTime() + 24 * 60 * 60 * 1000);
-      history.push({
-        state: "Finalizado",
-        date: formatDate(finalizadoDate),
-        description: "El pedido ha sido finalizado.",
-      });
-    } else if (order.estado === "Cancelado") {
-      const canceladoDate = new Date(baseDate.getTime() + 3 * 60 * 60 * 1000);
-      history.push({
-        state: "Cancelado",
-        date: formatDate(canceladoDate),
-        description: "El pedido ha sido cancelado.",
-      });
-    }
-
-    // Construct the response
+    // Construir respuesta
     const response = {
       id: order.idRastreo,
       status: order.estado,
@@ -817,8 +793,67 @@ routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
 
     res.status(200).json(response);
   } catch (error) {
-    console.error("Error fetching order:", error);
-    res.status(500).json({ message: "Error al rastrear el pedido. Intenta de nuevo más tarde." });
+    console.error("Error al rastrear pedido:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al rastrear el pedido",
+      error: error.message,
+    });
+  }
+});
+
+
+
+//Enpot de historial de pedidos
+routerPedidos.get("/historial/:idPedido", csrfProtection, async (req, res) => {
+  try {
+    const { idPedido } = req.params;
+
+    // Validar idPedido
+    if (!idPedido || isNaN(idPedido)) {
+      return res.status(400).json({
+        success: false,
+        message: "ID de pedido inválido",
+      });
+    }
+
+    // Consultar historial en tblhistorialestados
+    const [rows] = await pool.query(
+      `
+      SELECT 
+        idHistorial,
+        idPedido,
+        CONCAT(UCASE(LEFT(estadoAnterior,1)), LCASE(SUBSTRING(estadoAnterior,2))) AS estadoAnterior,
+        CONCAT(UCASE(LEFT(estadoNuevo,1)), LCASE(SUBSTRING(estadoNuevo,2))) AS estadoNuevo,
+        DATE_FORMAT(fechaActualizacion, '%Y-%m-%d %H:%i:%s') AS fechaActualizacion
+      FROM tblhistorialestados
+      WHERE idPedido = ?
+      ORDER BY fechaActualizacion ASC
+      `,
+      [idPedido]
+    );
+
+    // Si no hay registros
+    if (!rows || rows.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        message: "No se encontró historial para este pedido",
+      });
+    }
+
+   
+    res.status(200).json({
+      success: true,
+      data: rows,
+    });
+  } catch (error) {
+    console.error("Error al obtener historial:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener el historial del pedido",
+      error: error.message,
+    });
   }
 });
 
