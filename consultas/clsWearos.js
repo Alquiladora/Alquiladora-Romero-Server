@@ -59,4 +59,25 @@ routerWearOs.post('/wearos/validate-token', async (req, res) => {
 });
 
 
+
+routerWearOs.get('/wearos/token/:token', async (req, res, next) => {
+  const { token } = req.params;
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM wearos_tokens WHERE token = ?',
+      [token]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ success: false, message: 'Token inválido o no encontrado' });
+    }
+
+    res.json({ success: true, token: rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+
 module.exports = routerWearOs;
