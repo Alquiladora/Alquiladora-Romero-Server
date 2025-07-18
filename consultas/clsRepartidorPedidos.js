@@ -1337,22 +1337,22 @@ routerRepartidorPedidos.get('/repartidor/pedidos-hoy', verifyToken, async (req, 
     IFNULL(p.estadoActual, 'sin_estado') AS estado_pedido,
 
     CASE 
-      WHEN p.idUsuarios IS NOT NULL THEN 
-        CONCAT(u.nombre, ' ', u.apellidoP, ' - Pedido #', p.idPedido)
-      ELSE 
-        CONCAT(nc.nombre, ' ', nc.apellidoCompleto, ' - Pedido #', p.idPedido)
+        WHEN p.idUsuarios IS NOT NULL THEN 
+            CONCAT(u.nombre, ' ', u.apellidoP, ' - Pedido #', p.idPedido)
+        ELSE 
+            CONCAT(nc.nombre, ' ', nc.apellidoCompleto, ' - Pedido #', p.idPedido)
     END AS descripcion,
 
     CASE
-      WHEN p.idUsuarios IS NOT NULL THEN 
-        CONCAT(u.nombre, ' ', u.apellidoP)
-      ELSE 
-        CONCAT(nc.nombre, ' ', nc.apellidoCompleto)
+        WHEN p.idUsuarios IS NOT NULL THEN 
+            CONCAT(u.nombre, ' ', u.apellidoP)
+        ELSE 
+            CONCAT(nc.nombre, ' ', nc.apellidoCompleto)
     END AS cliente,
 
     CASE
-      WHEN p.idUsuarios IS NOT NULL THEN u.telefono
-      ELSE nc.telefono
+        WHEN p.idUsuarios IS NOT NULL THEN u.telefono
+        ELSE nc.telefono
     END AS telefono_cliente,
 
     dc.localidad,
@@ -1361,35 +1361,33 @@ routerRepartidorPedidos.get('/repartidor/pedidos-hoy', verifyToken, async (req, 
     dc.direccion,
     p.fechaInicio AS fecha_entrega,
     p.totalPagar AS total_a_pagar,
-    COALESCE(SUM(pg.monto), 0) AS total_pagado,
+    COALESCE(pg.total_pagado, 0) AS total_pagado,
     pd.diasAlquiler,
 
     CASE 
-      WHEN DATE(p.fechaRegistro) = ? AND DATE(p.fechaInicio) = ? THEN TRUE 
-      ELSE FALSE 
+        WHEN DATE(p.fechaRegistro) = ? AND DATE(p.fechaInicio) = ? THEN TRUE 
+        ELSE FALSE 
     END AS urgente,
 
     JSON_ARRAYAGG(
-  DISTINCT JSON_OBJECT(
-    'id'       , pd.idDetalle,
-    'nombre'   , pr.nombre,
-    'cantidad' , pd.cantidad,
-    'precio'   , pd.precioUnitario,
-    'subtotal' , pd.subtotal,
-    'color'    , c.color,
-    'estado'   , pd.estadoProducto,
-    'nota'     , pd.observaciones,
-    'foto'     , (
-        SELECT fp.urlFoto 
-        FROM tblfotosproductos fp 
-        WHERE fp.idProducto = pr.idProducto 
-        ORDER BY fp.fechaCreacion DESC 
-        LIMIT 1
-    )
-  )
-) AS productos
-
-
+        DISTINCT JSON_OBJECT(
+            'id'       , pd.idDetalle,
+            'nombre'   , pr.nombre,
+            'cantidad' , pd.cantidad,
+            'precio'   , pd.precioUnitario,
+            'subtotal' , pd.subtotal,
+            'color'    , c.color,
+            'estado'   , pd.estadoProducto,
+            'nota'     , pd.observaciones,
+            'foto'     , (
+                SELECT fp.urlFoto 
+                FROM tblfotosproductos fp 
+                WHERE fp.idProducto = pr.idProducto 
+                ORDER BY fp.fechaCreacion DESC 
+                LIMIT 1
+            )
+        )
+    ) AS productos
 
 FROM tblasignacionpedidos ap
 JOIN tblpedidos p ON ap.idPedido = p.idPedido
@@ -1397,13 +1395,13 @@ JOIN tbldireccioncliente dc ON p.idDireccion = dc.idDireccion
 LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
 LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
 
+-- Subquery de pagos con alias único (pg)
 LEFT JOIN (
     SELECT idPedido, SUM(monto) AS total_pagado
     FROM tblpagos
     WHERE estadoPago = 'completado'
     GROUP BY idPedido
 ) pg ON pg.idPedido = p.idPedido
-
 
 LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
 LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
@@ -1413,11 +1411,10 @@ LEFT JOIN tblcolores c ON pc.idColor = c.idColores
 WHERE ap.idRepartidor = (
     SELECT idRepartidor FROM tblrepartidores WHERE idUsuario = ?
 )
-  AND LOWER(p.estadoActual) IN ('enviando','recogiendo')
+AND LOWER(p.estadoActual) IN ('enviando','recogiendo')
 
 GROUP BY p.idPedido
 ORDER BY urgente DESC, p.idPedido;
-
       `,
       [fechaHoyMX, fechaHoyMX, idUsuario]
     );
