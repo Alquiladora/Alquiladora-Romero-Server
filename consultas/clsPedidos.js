@@ -580,7 +580,6 @@ ORDER BY p.fechaRegistro DESC;
 });
 
 
-
 routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
   try {
     const query = `
@@ -614,7 +613,12 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
         pagos.totalPagado,
         pagos.formaPago,
         CONCAT(r_usuario.nombre, ' ', r_usuario.apellidoP, ' ', r_usuario.apellidoM) AS nombreRepartidor,
-        r_usuario.telefono AS telefonoRepartidor
+        r_usuario.telefono AS telefonoRepartidor,
+        GROUP_CONCAT(
+          (SELECT urlFoto FROM tblfotosproductos fp 
+           WHERE fp.idProducto = prod.idProducto 
+           ORDER BY fp.idFoto ASC LIMIT 1)
+        ) AS imagenesProductos
       FROM tblpedidos p
       LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
       LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
@@ -644,7 +648,8 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
 
     const response = results.map(pedido => {
       const productosStrArray = pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : [];
-      const productosParsed = productosStrArray.map(prodStr => {
+      const imagenesStrArray = pedido.imagenesProductos ? pedido.imagenesProductos.split(',') : [];
+      const productosParsed = productosStrArray.map((prodStr, index) => {
         const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+),\s+Estado Producto:\s+(.+?),\s+Observaciones:\s+(.+)$/;
         const match = prodStr.match(regex);
 
@@ -657,6 +662,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
             subtotal: parseFloat(match[5]),
             estadoProducto: match[6].trim(),
             observaciones: match[7].trim(),
+            imagen: imagenesStrArray[index] || null, // Asocia la imagen correspondiente
           };
         } else {
           return {
@@ -667,6 +673,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
             subtotal: null,
             estadoProducto: null,
             observaciones: null,
+            imagen: null,
           };
         }
       });
@@ -725,6 +732,8 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
     });
   }
 });
+
+
 
 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
