@@ -579,6 +579,149 @@ ORDER BY p.fechaRegistro DESC;
   }
 });
 
+routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        p.idPedido,
+        p.idRastreo,
+        COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
+        COALESCE(u.telefono, d.telefono) AS telefono,
+        CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
+        p.fechaInicio,
+        p.fechaEntrega,
+        TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
+        p.horaAlquiler,
+        p.estadoActual AS estado,
+        CASE 
+          WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
+          WHEN nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
+          ELSE 'No cliente'
+        END AS tipoCliente,
+        GROUP_CONCAT(
+          CONCAT(
+            pd.cantidad, 'x ', prod.nombre, ' (', c.color, ') - ',
+            pd.precioUnitario, ' c/u, Subtotal: ', pd.subtotal, 
+            ', Estado Producto: ', pd.estadoProducto, 
+            ', Observaciones: ', COALESCE(pd.observaciones, 'Sin observaciones')
+          ) 
+          SEPARATOR ' | '
+        ) AS productosAlquilados,
+        pagos.pagosRealizados,
+        pagos.totalPagado,
+        pagos.formaPago,
+        CONCAT(r_usuario.nombre, ' ', r_usuario.apellidoP, ' ', r_usuario.apellidoM) AS nombreRepartidor,
+        r_usuario.telefono AS telefonoRepartidor
+      FROM tblpedidos p
+      LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
+      LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
+      LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
+      LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
+      LEFT JOIN tblcolores c ON pc.idColor = c.idColores
+      LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
+      LEFT JOIN tblrepartidores r ON p.idRepartidor = r.idRepartidor
+      LEFT JOIN tblusuarios r_usuario ON r.idUsuario = r_usuario.idUsuarios
+      LEFT JOIN (
+        SELECT 
+          idPedido,
+          GROUP_CONCAT(CONCAT(formaPago, ' / ', metodoPago, ' - $', monto, ' (', estadoPago, ')') SEPARATOR ' | ') AS pagosRealizados,
+          COALESCE(SUM(CASE WHEN estadoPago = 'completado' THEN monto ELSE 0 END), 0) AS totalPagado,
+          SUBSTRING_INDEX(GROUP_CONCAT(formaPago ORDER BY fechaPago DESC), ',', 1) AS formaPago
+        FROM tblpagos
+        GROUP BY idPedido
+      ) pagos ON p.idPedido = pagos.idPedido
+      WHERE LOWER(p.estadoActual) IN ('incidente', 'incompleto')
+      GROUP BY p.idPedido
+      ORDER BY p.fechaRegistro DESC;
+    `;
+
+    const [results] = await pool.query(query);
+
+    const response = results.map(pedido => {
+      const productosStrArray = pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : [];
+      const productosParsed = productosStrArray.map(prodStr => {
+        const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+),\s+Estado Producto:\s+(.+?),\s+Observaciones:\s+(.+)$/;
+        const match = prodStr.match(regex);
+
+        if (match) {
+          return {
+            cantidad: parseInt(match[1], 10),
+            nombre: match[2].trim(),
+            color: match[3].trim(),
+            precioUnitario: parseFloat(match[4]),
+            subtotal: parseFloat(match[5]),
+            estadoProducto: match[6].trim(),
+            observaciones: match[7].trim(),
+          };
+        } else {
+          return {
+            cantidad: null,
+            nombre: prodStr,
+            color: null,
+            precioUnitario: null,
+            subtotal: null,
+            estadoProducto: null,
+            observaciones: null,
+          };
+        }
+      });
+
+      const pagosResumen = pedido.pagosRealizados ? pedido.pagosRealizados.split(' | ') : [];
+
+      const estadoPago =
+        parseFloat(pedido.totalPagado) >= parseFloat(pedido.totalPagar)
+          ? 'completado'
+          : parseFloat(pedido.totalPagado) > 0
+          ? 'parcial'
+          : 'pendiente';
+
+      return {
+        idPedido: pedido.idPedido,
+        idRastreo: pedido.idRastreo,
+        cliente: {
+          nombre: pedido.nombreCliente,
+          telefono: pedido.telefono,
+          direccion: pedido.direccionCompleta,
+          tipoCliente: pedido.tipoCliente,
+        },
+        repartidor: {
+          nombre: pedido.nombreRepartidor || 'Sin repartidor asignado',
+          telefono: pedido.telefonoRepartidor || 'N/A',
+        },
+        fechas: {
+          inicio: pedido.fechaInicio,
+          entrega: pedido.fechaEntrega,
+          diasAlquiler: pedido.diasAlquiler,
+          horaAlquiler: pedido.horaAlquiler,
+        },
+        pago: {
+          resumen: pagosResumen,
+          totalPagado: parseFloat(pedido.totalPagado),
+          estadoPago: estadoPago,
+          formaPago: pedido.formaPago,
+        },
+        estado: pedido.estado,
+        productos: productosParsed,
+        totalPagar: pedido.totalPagar,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: response,
+      total: response.length,
+    });
+  } catch (error) {
+    console.error('Error fetching manual pedidos:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener los pedidos manuales',
+      error: error.message,
+    });
+  }
+});
+
 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
   try {
@@ -856,6 +999,8 @@ routerPedidos.get("/historial/:idPedido", csrfProtection, async (req, res) => {
     });
   }
 });
+
+
 
 
 module.exports = routerPedidos;
