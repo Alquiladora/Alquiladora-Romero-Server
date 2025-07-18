@@ -1396,6 +1396,14 @@ JOIN tblpedidos p ON ap.idPedido = p.idPedido
 JOIN tbldireccioncliente dc ON p.idDireccion = dc.idDireccion
 LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
 LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+LEFT JOIN (
+    SELECT idPedido, SUM(monto) AS total_pagado
+    FROM tblpagos
+    WHERE estadoPago = 'completado'
+    GROUP BY idPedido
+) pg ON pg.idPedido = p.idPedido
+
+
 LEFT JOIN tblpagos pg ON p.idPedido = pg.idPedido AND pg.estadoPago = 'completado'
 LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
 LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
