@@ -579,6 +579,8 @@ ORDER BY p.fechaRegistro DESC;
   }
 });
 
+
+
 routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
   try {
     const query = `
@@ -593,6 +595,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
         TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
         p.horaAlquiler,
         p.estadoActual AS estado,
+        p.totalPagar,
         CASE 
           WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
           WHEN nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
@@ -620,12 +623,13 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
       LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
       LEFT JOIN tblcolores c ON pc.idColor = c.idColores
       LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
-      LEFT JOIN tblrepartidores r ON p.idRepartidor = r.idRepartidor
+      LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
+      LEFT JOIN tblrepartidores r ON ap.idRepartidor = r.idRepartidor
       LEFT JOIN tblusuarios r_usuario ON r.idUsuario = r_usuario.idUsuarios
       LEFT JOIN (
         SELECT 
           idPedido,
-          GROUP_CONCAT(CONCAT(formaPago, ' / ', metodoPago, ' - $', monto, ' (', estadoPago, ')') SEPARATOR ' | ') AS pagosRealizados,
+          GROUP_CONCAT(CONCAT(formaPago, ' / ', metodoPago, ' - $', COALESCE(monto, '0'), ' (', estadoPago, ')') SEPARATOR ' | ') AS pagosRealizados,
           COALESCE(SUM(CASE WHEN estadoPago = 'completado' THEN monto ELSE 0 END), 0) AS totalPagado,
           SUBSTRING_INDEX(GROUP_CONCAT(formaPago ORDER BY fechaPago DESC), ',', 1) AS formaPago
         FROM tblpagos
@@ -703,7 +707,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
         },
         estado: pedido.estado,
         productos: productosParsed,
-        totalPagar: pedido.totalPagar,
+        totalPagar: parseFloat(pedido.totalPagar),
       };
     });
 
@@ -713,10 +717,10 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
       total: response.length,
     });
   } catch (error) {
-    console.error('Error fetching manual pedidos:', error);
+    console.error('Error fetching pedidos incidentes:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al obtener los pedidos manuales',
+      message: 'Error al obtener los pedidos incidentes o incompletos',
       error: error.message,
     });
   }
