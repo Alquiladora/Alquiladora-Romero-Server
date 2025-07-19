@@ -841,11 +841,11 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
       const uniqueProductos = [];
       const seenIds = new Set();
       productosParsed.forEach(producto => {
-        if (producto.idPedidoDetalle && !seenIds.has(producto.idPedidoDetalle)) {
-          seenIds.add(producto.idPedidoDetalle);
+        if (producto.idDetalle && !seenIds.has(producto.idDetalle)) {
+          seenIds.add(producto.idDetalle);
           uniqueProductos.push({
             idProductoColores: null,
-            idPedidoDetalle: producto.idPedidoDetalle,
+            idPedidoDetalle: producto.idDetalle,
             cantidad: producto.cantidad,
             nombre: producto.nombre,
             color: producto.color,
