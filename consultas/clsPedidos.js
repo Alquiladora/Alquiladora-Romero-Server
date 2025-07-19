@@ -748,39 +748,56 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
       SELECT 
         p.idPedido,
         p.idRastreo,
-        COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
-        COALESCE(u.telefono, d.telefono) AS telefono,
-        CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
+        COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido), 'No especificado') AS nombreCliente,
+        COALESCE(u.telefono, d.telefono, 'N/A') AS telefono,
+        COALESCE(CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal), 'N/A') AS direccionCompleta,
         p.fechaInicio,
         p.fechaEntrega,
         TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
         p.horaAlquiler,
-        p.estadoActual AS estado,
+        p.detallesPago,
         p.totalPagar,
+        CONCAT(UCASE(LEFT(p.estadoActual, 1)), LCASE(SUBSTRING(p.estadoActual, 2))) AS estado,
+        p.fechaRegistro,
         CASE 
           WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
           WHEN nc.idNoClientes IS NOT NULL THEN 'Cliente convertido'
           ELSE 'No cliente'
         END AS tipoCliente,
-        GROUP_CONCAT(
-          CONCAT(
-            pd.cantidad, 'x ', prod.nombre, ' (', c.color, ') - ',
-            pd.precioUnitario, ' c/u, Subtotal: ', pd.subtotal, 
-            ', Estado Producto: ', COALESCE(pd.estadoProducto, 'Sin estado'), 
-            ', Observaciones: ', COALESCE(pd.observaciones, 'Sin observaciones')
-          ) 
-          SEPARATOR ' | '
+        COALESCE(CONCAT(r_usuario.nombre, ' ', r_usuario.apellidoP, ' ', r_usuario.apellidoM), 'Sin repartidor asignado') AS nombreRepartidor,
+        COALESCE(r_usuario.telefono, 'N/A') AS telefonoRepartidor,
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'idPedidoDetalle', pd.idPedidoDetalle,
+            'cantidad', pd.cantidad,
+            'nombre', prod.nombre,
+            'color', COALESCE(c.color, 'Sin color'),
+            'precioUnitario', pd.precioUnitario,
+            'subtotal', pd.subtotal,
+            'diasAlquiler', pd.diasAlquiler,
+            'estadoProducto', COALESCE(pd.estadoProducto, 'Sin estado'),
+            'observaciones', COALESCE(pd.observaciones, 'Sin observaciones'),
+            'imagen', (
+              SELECT urlFoto 
+              FROM tblfotosproductos fp 
+              WHERE fp.idProducto = prod.idProducto 
+              ORDER BY fp.idFoto ASC LIMIT 1
+            )
+          )
         ) AS productosAlquilados,
-        GROUP_CONCAT(
-          (SELECT urlFoto FROM tblfotosproductos fp 
-           WHERE fp.idProducto = prod.idProducto 
-           ORDER BY fp.idFoto ASC LIMIT 1)
-        ) AS imagenesProductos,
-        pagos.pagosRealizados,
-        pagos.totalPagado,
-        pagos.formaPago,
-        CONCAT(r_usuario.nombre, ' ', r_usuario.apellidoP, ' ', r_usuario.apellidoM) AS nombreRepartidor,
-        r_usuario.telefono AS telefonoRepartidor
+        (
+          SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+              'formaPago', pg.formaPago,
+              'metodoPago', pg.metodoPago,
+              'monto', pg.monto,
+              'estadoPago', pg.estadoPago,
+              'fechaPago', DATE_FORMAT(pg.fechaPago, '%Y-%m-%d %H:%i:%s')
+            )
+          )
+          FROM tblpagos pg
+          WHERE pg.idPedido = p.idPedido
+        ) AS pagos
       FROM tblpedidos p
       LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
       LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
@@ -792,69 +809,76 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
       LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
       LEFT JOIN tblrepartidores r ON ap.idRepartidor = r.idRepartidor
       LEFT JOIN tblusuarios r_usuario ON r.idUsuario = r_usuario.idUsuarios
-      LEFT JOIN (
-        SELECT 
-          idPedido,
-          GROUP_CONCAT(CONCAT(formaPago, ' / ', metodoPago, ' - $', COALESCE(monto, '0'), ' (', estadoPago, ')') SEPARATOR ' | ') AS pagosRealizados,
-          COALESCE(SUM(CASE WHEN estadoPago = 'completado' THEN monto ELSE 0 END), 0) AS totalPagado,
-          SUBSTRING_INDEX(GROUP_CONCAT(formaPago ORDER BY fechaPago DESC), ',', 1) AS formaPago
-        FROM tblpagos
-        GROUP BY idPedido
-      ) pagos ON p.idPedido = pagos.idPedido
-      WHERE LOWER(p.estadoActual) = 'devuelto'
-      GROUP BY p.idPedido, p.idRastreo, nombreCliente, telefono, direccionCompleta, p.fechaInicio, p.fechaEntrega, p.horaAlquiler, p.estadoActual, p.totalPagar, tipoCliente, pagos.pagosRealizados, pagos.totalPagado, pagos.formaPago, nombreRepartidor, telefonoRepartidor
+      WHERE LOWER(p.estadoActual) IN ('devuelto')
+      GROUP BY 
+        p.idPedido,
+        p.idRastreo,
+        nombreCliente,
+        telefono,
+        direccionCompleta,
+        p.fechaInicio,
+        p.fechaEntrega,
+        p.horaAlquiler,
+        p.detallesPago,
+        p.totalPagar,
+        p.estadoActual,
+        p.fechaRegistro,
+        tipoCliente,
+        nombreRepartidor,
+        telefonoRepartidor
       ORDER BY p.fechaRegistro DESC;
     `;
 
     const [results] = await pool.query(query);
 
     const response = results.map(pedido => {
-      const productosStrArray = pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : [];
-      const imagenesStrArray = pedido.imagenesProductos ? pedido.imagenesProductos.split(',') : [];
+      // Parsear productosAlquilados (ya es un JSON array)
+      const productosParsed = pedido.productosAlquilados && pedido.productosAlquilados !== '[]'
+        ? JSON.parse(pedido.productosAlquilados)
+        : [];
 
-      console.log('productosAlquilados:', pedido.productosAlquilados); 
-      console.log('imagenesProductos:', pedido.imagenesProductos); 
-
-      const productosParsed = productosStrArray.map((prodStr, index) => {
-        const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+),\s+Estado Producto:\s*(.+?)?,\s+Observaciones:\s+(.+)$/;
-        const match = prodStr.match(regex);
-
-        if (match) {
-          return {
-            idProductoColores: null, 
-            cantidad: parseInt(match[1], 10),
-            nombre: match[2].trim(),
-            color: match[3].trim(),
-            precioUnitario: parseFloat(match[4]),
-            subtotal: parseFloat(match[5]),
-            estadoProducto: match[6] ? match[6].trim() : 'Sin estado',
-            observaciones: match[7].trim(),
-            imagen: imagenesStrArray[index] || null,
-          };
-        } else {
-          console.warn(`No se pudo parsear el producto: ${prodStr}`);
-          return {
+      // Eliminar productos duplicados basados en idPedidoDetalle
+      const uniqueProductos = [];
+      const seenIds = new Set();
+      productosParsed.forEach(producto => {
+        if (producto.idPedidoDetalle && !seenIds.has(producto.idPedidoDetalle)) {
+          seenIds.add(producto.idPedidoDetalle);
+          uniqueProductos.push({
             idProductoColores: null,
-            cantidad: null,
-            nombre: prodStr,
-            color: null,
-            precioUnitario: null,
-            subtotal: null,
-            estadoProducto: null,
-            observaciones: null,
-            imagen: null,
-          };
+            idPedidoDetalle: producto.idPedidoDetalle,
+            cantidad: producto.cantidad,
+            nombre: producto.nombre,
+            color: producto.color,
+            precioUnitario: parseFloat(producto.precioUnitario),
+            subtotal: parseFloat(producto.subtotal),
+            diasAlquiler: producto.diasAlquiler,
+            estadoProducto: producto.estadoProducto,
+            observaciones: producto.observaciones,
+            imagen: producto.imagen || null,
+          });
         }
       });
 
-      const pagosResumen = pedido.pagosRealizados ? pedido.pagosRealizados.split(' | ') : [];
+      // Parsear pagos (ya es un JSON array)
+      const pagosParsed = pedido.pagos && pedido.pagos !== '[]'
+        ? JSON.parse(pedido.pagos)
+        : [];
+
+      // Calcular totalPagado y estadoPago
+      const totalPagado = pagosParsed.reduce((sum, pago) => {
+        return pago.estadoPago === 'completado' ? sum + parseFloat(pago.monto) : sum;
+      }, 0);
 
       const estadoPago =
-        parseFloat(pedido.totalPagado) >= parseFloat(pedido.totalPagar)
+        totalPagado >= parseFloat(pedido.totalPagar)
           ? 'completado'
-          : parseFloat(pedido.totalPagado) > 0
+          : totalPagado > 0
           ? 'parcial'
           : 'pendiente';
+
+      const pagosResumen = pagosParsed.map(pago => 
+        `${pago.formaPago} / ${pago.metodoPago} - $${parseFloat(pago.monto).toFixed(2)} (${pago.estadoPago})`
+      );
 
       return {
         idPedido: pedido.idPedido,
@@ -877,12 +901,12 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         },
         pago: {
           resumen: pagosResumen,
-          totalPagado: parseFloat(pedido.totalPagado) || 0,
+          totalPagado: totalPagado,
           estadoPago: estadoPago,
-          formaPago: pedido.formaPago || 'N/A',
+          formaPago: pagosParsed.length > 0 ? pagosParsed[pagosParsed.length - 1].formaPago : 'N/A',
         },
         estado: pedido.estado || 'Devuelto',
-        productos: productosParsed,
+        productos: uniqueProductos,
         totalPagar: parseFloat(pedido.totalPagar) || 0,
       };
     });
@@ -901,6 +925,8 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
     });
   }
 });
+
+
 
 //Actualizar pedidos ocn etsado incidente o incompleto
 routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res) => {
