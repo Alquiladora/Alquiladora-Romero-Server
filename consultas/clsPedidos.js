@@ -927,7 +927,7 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
   }
 });
 
-
+//
 
 //Actualizar pedidos ocn etsado incidente o incompleto
 routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res) => {
