@@ -745,7 +745,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
 routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
   try {
     const query = `
-      SELECT 
+          SELECT 
         p.idPedido,
         p.idRastreo,
         COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido), 'No especificado') AS nombreCliente,
@@ -768,7 +768,7 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         COALESCE(r_usuario.telefono, 'N/A') AS telefonoRepartidor,
         JSON_ARRAYAGG(
           JSON_OBJECT(
-            'idPedidoDetalle', pd.idPedidoDetalle,
+            'idDetalle', pd.idDetalle,
             'cantidad', pd.cantidad,
             'nombre', prod.nombre,
             'color', COALESCE(c.color, 'Sin color'),
