@@ -597,14 +597,14 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
         p.totalPagar,
         CASE 
           WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
-          WHEN nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
+          WHEN nc.idNoClientes IS NOT NULL THEN 'Cliente convertido'
           ELSE 'No cliente'
         END AS tipoCliente,
         GROUP_CONCAT(
           CONCAT(
             pd.cantidad, 'x ', prod.nombre, ' (', c.color, ') - ',
             pd.precioUnitario, ' c/u, Subtotal: ', pd.subtotal, 
-            ', Estado Producto: ', pd.estadoProducto, 
+            ', Estado Producto: ', COALESCE(pd.estadoProducto, 'Sin estado'), 
             ', Observaciones: ', COALESCE(pd.observaciones, 'Sin observaciones')
           ) 
           SEPARATOR ' | '
@@ -615,9 +615,12 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
         CONCAT(r_usuario.nombre, ' ', r_usuario.apellidoP, ' ', r_usuario.apellidoM) AS nombreRepartidor,
         r_usuario.telefono AS telefonoRepartidor,
         GROUP_CONCAT(
-          (SELECT urlFoto FROM tblfotosproductos fp 
-           WHERE fp.idProducto = prod.idProducto 
-           ORDER BY fp.idFoto ASC LIMIT 1)
+          COALESCE(
+            (SELECT urlFoto FROM tblfotosproductos fp 
+             WHERE fp.idProducto = prod.idProducto 
+             ORDER BY fp.idFoto ASC LIMIT 1),
+            'Sin imagen'
+          )
         ) AS imagenesProductos
       FROM tblpedidos p
       LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
@@ -649,8 +652,12 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
     const response = results.map(pedido => {
       const productosStrArray = pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : [];
       const imagenesStrArray = pedido.imagenesProductos ? pedido.imagenesProductos.split(',') : [];
+
+      console.log('productosAlquilados:', pedido.productosAlquilados); // Para depuración
+      console.log('imagenesProductos:', pedido.imagenesProductos); // Para depuración
+
       const productosParsed = productosStrArray.map((prodStr, index) => {
-        const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+),\s+Estado Producto:\s+(.+?),\s+Observaciones:\s+(.+)$/;
+        const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+),\s+Estado Producto:\s*(.+?)?,\s+Observaciones:\s+(.+)$/;
         const match = prodStr.match(regex);
 
         if (match) {
@@ -660,11 +667,12 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
             color: match[3].trim(),
             precioUnitario: parseFloat(match[4]),
             subtotal: parseFloat(match[5]),
-            estadoProducto: match[6].trim(),
+            estadoProducto: match[6] ? match[6].trim() : 'Sin estado',
             observaciones: match[7].trim(),
-            imagen: imagenesStrArray[index] || null, // Asocia la imagen correspondiente
+            imagen: imagenesStrArray[index] || null,
           };
         } else {
+          console.warn(`No se pudo parsear el producto: ${prodStr}`);
           return {
             cantidad: null,
             nombre: prodStr,
@@ -683,7 +691,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
       const estadoPago =
         parseFloat(pedido.totalPagado) >= parseFloat(pedido.totalPagar)
           ? 'completado'
-          : parseFloat(pedido.totalPagado) > 0
+          : parseFloat(pedido.totalPagar) > 0
           ? 'parcial'
           : 'pendiente';
 
@@ -732,8 +740,6 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
     });
   }
 });
-
-
 
 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
