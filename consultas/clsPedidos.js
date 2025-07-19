@@ -742,7 +742,6 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
 });
 
 
-
 routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
   try {
     const query = `
@@ -750,7 +749,9 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         p.idPedido,
         p.idRastreo,
         COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
-        COALESCE(u.telefono, d.telefono) AS telefono,
+       弄
+
+System: COALESCE(u.telefono, d.telefono) AS telefono,
         CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
         p.fechaInicio,
         p.fechaEntrega,
@@ -772,19 +773,16 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
           ) 
           SEPARATOR ' | '
         ) AS productosAlquilados,
+        GROUP_CONCAT(
+          (SELECT urlFoto FROM tblfotosproductos fp 
+           WHERE fp.idProducto = prod.idProducto 
+           ORDER BY fp.idFoto ASC LIMIT 1)
+        ) AS imagenesProductos,
         pagos.pagosRealizados,
         pagos.totalPagado,
         pagos.formaPago,
         CONCAT(r_usuario.nombre, ' ', r_usuario.apellidoP, ' ', r_usuario.apellidoM) AS nombreRepartidor,
-        r_usuario.telefono AS telefonoRepartidor,
-        GROUP_CONCAT(
-          COALESCE(
-            (SELECT urlFoto FROM tblfotosproductos fp 
-             WHERE fp.idProducto = prod.idProducto 
-             ORDER BY fp.idFoto ASC LIMIT 1),
-            'Sin imagen'
-          )
-        ) AS imagenesProductos
+        r_usuario.telefono AS telefonoRepartidor
       FROM tblpedidos p
       LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
       LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
@@ -806,7 +804,7 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         GROUP BY idPedido
       ) pagos ON p.idPedido = pagos.idPedido
       WHERE LOWER(p.estadoActual) = 'devuelto'
-      GROUP BY p.idPedido
+      GROUP BY p.idPedido, p.idRastreo, nombreCliente, telefono, direccionCompleta, p.fechaInicio, p.fechaEntrega, p.horaAlquiler, p.estadoActual, p.totalPagar, tipoCliente, pagos.pagosRealizados, pagos.totalPagado, pagos.formaPago, nombreRepartidor, telefonoRepartidor
       ORDER BY p.fechaRegistro DESC;
     `;
 
@@ -864,30 +862,30 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         idPedido: pedido.idPedido,
         idRastreo: pedido.idRastreo,
         cliente: {
-          nombre: pedido.nombreCliente,
-          telefono: pedido.telefono,
-          direccion: pedido.direccionCompleta,
-          tipoCliente: pedido.tipoCliente,
+          nombre: pedido.nombreCliente || 'No especificado',
+          telefono: pedido.telefono || 'N/A',
+          direccion: pedido.direccionCompleta || 'N/A',
+          tipoCliente: pedido.tipoCliente || 'No cliente',
         },
         repartidor: {
           nombre: pedido.nombreRepartidor || 'Sin repartidor asignado',
           telefono: pedido.telefonoRepartidor || 'N/A',
         },
         fechas: {
-          inicio: pedido.fechaInicio,
-          entrega: pedido.fechaEntrega,
-          diasAlquiler: pedido.diasAlquiler,
-          horaAlquiler: pedido.horaAlquiler,
+          inicio: pedido.fechaInicio || null,
+          entrega: pedido.fechaEntrega || null,
+          diasAlquiler: pedido.diasAlquiler || 0,
+          horaAlquiler: pedido.horaAlquiler || 'N/A',
         },
         pago: {
           resumen: pagosResumen,
-          totalPagado: parseFloat(pedido.totalPagado),
+          totalPagado: parseFloat(pedido.totalPagado) || 0,
           estadoPago: estadoPago,
-          formaPago: pedido.formaPago,
+          formaPago: pedido.formaPago || 'N/A',
         },
-        estado: pedido.estado,
+        estado: pedido.estado || 'Devuelto',
         productos: productosParsed,
-        totalPagar: parseFloat(pedido.totalPagar),
+        totalPagar: parseFloat(pedido.totalPagar) || 0,
       };
     });
 
@@ -905,7 +903,6 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
     });
   }
 });
-
 
 //Actualizar pedidos ocn etsado incidente o incompleto
 routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res) => {
