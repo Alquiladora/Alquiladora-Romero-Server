@@ -741,6 +741,77 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
   }
 });
 
+//Actualizar pedidos ocn etsado incidente o incompleto
+routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res) => {
+  const { idPedido, newStatus, productUpdates } = req.body;
+
+  // Iniciar una transacción para garantizar consistencia en la base de datos
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. Actualizar estado del pedido en tblpedidos
+    await connection.query(
+      `UPDATE tblpedidos SET estadoActual = ? WHERE idPedido = ?`,
+      [newStatus, idPedido]
+    );
+
+    // 2. Actualizar estado de los productos si vienen actualizaciones
+    if (Array.isArray(productUpdates) && productUpdates.length > 0) {
+      for (const { idProductoColores, estadoProducto } of productUpdates) {
+        await connection.query(
+          `UPDATE tblpedidodetalles SET estadoProducto = ?, observaciones = NULL WHERE idPedido = ? AND idProductoColores = ?`,
+          [estadoProducto, idPedido, idProductoColores]
+        );
+      }
+    }
+
+    // 3. Si el estado del pedido es "Finalizado" o "Cancelado", actualizar el inventario
+    if (newStatus === "Finalizado" || newStatus === "Cancelado") {
+      // Obtener los productos asociados al pedido desde tblpedidodetalles
+      const [productos] = await connection.query(
+        `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
+        [idPedido]
+      );
+
+      // Para cada producto, sumar la cantidad al stock en tblinventario
+      for (const producto of productos) {
+        const { idProductoColores, cantidad } = producto;
+
+        // Verificar si el producto existe en tblinventario
+        const [inventario] = await connection.query(
+          `SELECT stock FROM tblinventario WHERE idProductoColor = ?`,
+          [idProductoColores]
+        );
+
+        if (inventario.length === 0) {
+          // Si el producto no existe en el inventario, lanzar un error o manejar según tu lógica
+          throw new Error(`Producto con idProductoColor ${idProductoColores} no encontrado en el inventario`);
+        }
+
+        // Actualizar el stock sumando la cantidad
+        await connection.query(
+          `UPDATE tblinventario SET stock = stock + ? WHERE idProductoColor = ?`,
+          [cantidad, idProductoColores]
+        );
+      }
+    }
+
+    // Confirmar la transacción
+    await connection.commit();
+
+    res.json({ success: true, message: "Estado actualizado correctamente y stock actualizado (si aplica)" });
+  } catch (error) {
+    // Revertir la transacción en caso de error
+    await connection.rollback();
+    console.error("Error al actualizar pedido:", error);
+    res.status(500).json({ success: false, message: "Error al actualizar pedido", error: error.message });
+  } finally {
+    // Liberar la conexión
+    connection.release();
+  }
+});
+
 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
   try {
