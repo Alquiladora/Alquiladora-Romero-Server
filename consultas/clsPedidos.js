@@ -749,9 +749,7 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         p.idPedido,
         p.idRastreo,
         COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
-       弄
-
-System: COALESCE(u.telefono, d.telefono) AS telefono,
+        COALESCE(u.telefono, d.telefono) AS telefono,
         CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
         p.fechaInicio,
         p.fechaEntrega,
