@@ -745,7 +745,7 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
 routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
   try {
     const query = `
-          SELECT 
+            SELECT 
         p.idPedido,
         p.idRastreo,
         COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido), 'No especificado') AS nombreCliente,
@@ -770,6 +770,7 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
           JSON_OBJECT(
             'idDetalle', pd.idDetalle,
             'cantidad', pd.cantidad,
+            'idProductoColores', pd.idProductoColores,
             'nombre', prod.nombre,
             'color', COALESCE(c.color, 'Sin color'),
             'precioUnitario', pd.precioUnitario,
@@ -844,7 +845,7 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         if (producto.idDetalle && !seenIds.has(producto.idDetalle)) {
           seenIds.add(producto.idDetalle);
           uniqueProductos.push({
-            idProductoColores: null,
+            idProductoColores: producto.idProductoColores,
             idPedidoDetalle: producto.idDetalle,
             cantidad: producto.cantidad,
             nombre: producto.nombre,
