@@ -26,37 +26,62 @@ async function setUniqueActiveAccount(accountIdToActivate) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.query(`SELECT stripe_account_id, onboarding_completed FROM tblCuentasReceptoras WHERE id = ? FOR UPDATE`, [accountIdToActivate]);
+    const [rows] = await connection.query(
+      `SELECT stripe_account_id, onboarding_completed FROM tblCuentasReceptoras WHERE id = ? FOR UPDATE`,
+      [accountIdToActivate]
+    );
     if (rows.length === 0) throw new Error('Cuenta no encontrada para activar.');
     const accountToActivate = rows[0];
+    console.log(`[SET_ACTIVE] Activando cuenta: ${accountToActivate.stripe_account_id}`);
 
     if (!accountToActivate.onboarding_completed) {
       throw new Error('No se puede activar una cuenta que no ha completado el onboarding en Stripe.');
     }
-    const [activeAccounts] = await connection.query(`SELECT id, stripe_account_id FROM tblCuentasReceptoras WHERE activa = 1 FOR UPDATE`);
+
+    const [activeAccounts] = await connection.query(
+      `SELECT id, stripe_account_id FROM tblCuentasReceptoras WHERE activa = 1 FOR UPDATE`
+    );
     if (activeAccounts.length > 0 && activeAccounts[0].id !== accountIdToActivate) {
       const previouslyActiveAccount = activeAccounts[0];
-      await stripe.accounts.update(previouslyActiveAccount.stripe_account_id, {
-        capabilities: { card_payments: { requested: false } },
+      console.log(`[SET_ACTIVE] Desactivando cuenta previa: ${previouslyActiveAccount.stripe_account_id}`);
+      const deactivated = await stripe.accounts.update(previouslyActiveAccount.stripe_account_id, {
+        capabilities: {
+          card_payments: { requested: false },
+          link_payments: { requested: false },
+        },
       });
+      console.log(`[SET_ACTIVE] Estado después de desactivar: ${JSON.stringify(deactivated.capabilities)}`);
+      // Verificar el estado real después de la actualización
+      const updatedPrevAccount = await stripe.accounts.retrieve(previouslyActiveAccount.stripe_account_id);
+      if (updatedPrevAccount.capabilities.card_payments === 'active' || updatedPrevAccount.capabilities.link_payments === 'active') {
+        console.warn(`[SET_ACTIVE] Advertencia: No se pudieron desactivar las capacidades para ${previouslyActiveAccount.stripe_account_id}. Acción manual requerida.`);
+        // Opcional: Notificar o registrar esto para acción manual
+      }
     }
 
-    // Verificar capacidades actuales de la cuenta
     const stripeAccount = await stripe.accounts.retrieve(accountToActivate.stripe_account_id);
-    if (!stripeAccount.capabilities.card_payments) {
-      console.log(`[SET_ACTIVE] Habilitando card_payments para cuenta ${accountToActivate.stripe_account_id}`);
-      await stripe.accounts.update(accountToActivate.stripe_account_id, {
-        capabilities: { card_payments: { requested: true } },
+    console.log(`[SET_ACTIVE] Capacidades actuales: ${JSON.stringify(stripeAccount.capabilities)}`);
+    const capabilitiesToUpdate = {};
+    if (!stripeAccount.capabilities.card_payments || !stripeAccount.capabilities.link_payments) {
+      capabilitiesToUpdate.card_payments = { requested: true };
+      capabilitiesToUpdate.link_payments = { requested: true };
+      console.log(`[SET_ACTIVE] Activando capacidades para: ${accountToActivate.stripe_account_id}`);
+    }
+    if (Object.keys(capabilitiesToUpdate).length > 0) {
+      const updatedAccount = await stripe.accounts.update(accountToActivate.stripe_account_id, {
+        capabilities: capabilitiesToUpdate,
       });
+      console.log(`[SET_ACTIVE] Estado después de activar: ${JSON.stringify(updatedAccount.capabilities)}`);
     }
 
     await connection.query(`UPDATE tblCuentasReceptoras SET activa = 0`);
     await connection.query(`UPDATE tblCuentasReceptoras SET activa = 1 WHERE id = ?`, [accountIdToActivate]);
+    console.log(`[SET_ACTIVE] Cuenta ${accountIdToActivate} marcada como activa`);
 
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    console.error('[SET_ACTIVE] Error en la transacción, se revirtieron los cambios.', error);
+    console.error('[SET_ACTIVE] Error en la transacción:', error.message, error.stack);
     throw error;
   } finally {
     connection.release();
@@ -106,15 +131,43 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 });
 
 
+
+
+//_______________________________________________________________________________________________________________-
 // CREAR CUENTA
 router.post('/cuentas', jsonParser, async (req, res) => {
   const { nombre, email, banco, notas } = req.body;
+
+  console.log("Datos recibidos para crea tarjeta ")
   if (!nombre || !email) return res.status(400).json({ error: 'El nombre y el email son requeridos' });
   try {
-    const account = await stripe.accounts.create({ type: 'express', country: 'MX', email, business_type: 'individual', capabilities: { card_payments: { requested: true }, transfers: { requested: true } }, business_profile: { name: nombre } });
-    const accountLink = await stripe.accountLinks.create({ account: account.id, refresh_url: getSafeUrl(process.env.STRIPE_REFRESH_URL, 'gestion_de_pagos'), return_url: getSafeUrl(process.env.STRIPE_RETURN_URL, 'gestion_de_pagos'), type: 'account_onboarding' });
-    await pool.query(`INSERT INTO tblCuentasReceptoras (stripe_account_id, nombre, email, banco, notas, activa) VALUES (?, ?, ?, ?, ?, ?)`, [account.id, nombre, email, banco || null, notas || null, 0]);
-    res.status(201).json({ message: 'Cuenta creada. Completa la configuración en Stripe.', stripe_account_id: account.id, onboarding_url: accountLink.url });
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: 'MX',
+      email,
+      business_type: 'individual',
+      capabilities: {
+        card_payments: { requested: true },
+        link_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      business_profile: { name: nombre },
+    });
+    const accountLink = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: getSafeUrl(process.env.STRIPE_REFRESH_URL, 'gestion_de_pagos'),
+      return_url: getSafeUrl(process.env.STRIPE_RETURN_URL, 'gestion_de_pagos'),
+      type: 'account_onboarding',
+    });
+    await pool.query(
+      `INSERT INTO tblCuentasReceptoras (stripe_account_id, nombre, email, banco, notas, activa) VALUES (?, ?, ?, ?, ?, ?)`,
+      [account.id, nombre, email, banco || null, notas || null, 0]
+    );
+    res.status(201).json({
+      message: 'Cuenta creada. Completa la configuración en Stripe.',
+      stripe_account_id: account.id,
+      onboarding_url: accountLink.url,
+    });
   } catch (error) {
     console.error(`[CUENTAS] Error: ${error.message}`);
     res.status(500).json({ error: 'Error interno al crear la cuenta en Stripe.' });
@@ -148,13 +201,22 @@ router.get('/cuentas', async (req, res) => {
 router.get('/cuentas/onboarding-link/:stripe_account_id', async (req, res) => {
   const { stripe_account_id } = req.params;
   try {
-    const accountLink = await stripe.accountLinks.create({ account: stripe_account_id, refresh_url: getSafeUrl(process.env.STRIPE_REFRESH_URL, 'gestion_de_pagos'), return_url: getSafeUrl(process.env.STRIPE_RETURN_URL, 'gestion_de_pagos'), type: 'account_onboarding' });
+    const accountLink = await stripe.accountLinks.create({
+      account: stripe_account_id,
+      refresh_url: getSafeUrl(process.env.STRIPE_REFRESH_URL, 'gestion_de_pagos'),
+      return_url: getSafeUrl(process.env.STRIPE_RETURN_URL, 'gestion_de_pagos'),
+      type: 'account_onboarding',
+      // Opcional: Especificar capacidades explícitamente si es necesario
+      // capabilities: { card_payments: { requested: true }, link_payments: { requested: true } },
+    });
     res.json({ url: accountLink.url });
   } catch (error) {
     console.error(`[ONBOARDING] Error generando link: ${error.message}`);
     res.status(500).json({ error: 'No se pudo generar el link' });
   }
 });
+
+
 
 // SINCRONIZAR CUENTAS
 router.get('/sync-cuentas', async (req, res) => {
@@ -196,7 +258,7 @@ router.delete('/cuentas/:id', async (req, res) => {
     if (cuentas[0].activa) return res.status(400).json({ error: 'No se puede eliminar una cuenta que está activa.' });
     try {
       await stripe.accounts.del(cuentas[0].stripe_account_id);
-    } catch(stripeError) {
+    } catch (stripeError) {
       console.warn(`[ELIMINAR] No se pudo eliminar la cuenta ${cuentas[0].stripe_account_id} de Stripe (puede que ya no exista): ${stripeError.message}`);
     }
     await pool.query(`DELETE FROM tblCuentasReceptoras WHERE id = ?`, [id]);

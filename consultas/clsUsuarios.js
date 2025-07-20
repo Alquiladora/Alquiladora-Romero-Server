@@ -284,7 +284,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Crear la cookie de sesión
     res.cookie("sesionToken", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "local",
       sameSite: "None",
       maxAge: TOKEN_EXPIRATION_TIME,
     });
@@ -645,7 +645,7 @@ usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res)
     }
     res.clearCookie("sesionToken", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "local",
       sameSite: "None",
     });
     console.log("sesion cerrada correctamente");
@@ -1300,7 +1300,7 @@ ORDER BY horaInicio DESC;
 usuarioRouter.get("/totalUsuarios", verifyToken, async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
-SELECT
+      SELECT
   (SELECT COUNT(*) FROM tblusuarios) AS totalUsuarios,
 
   (SELECT COUNT(DISTINCT p.idPedido)
@@ -1309,6 +1309,7 @@ SELECT
      'procesando',
      'confirmado',
      'enviando',
+     'recogiendo',
      'en alquiler',
      'devuelto',
      'incompleto',
@@ -1317,26 +1318,17 @@ SELECT
   ) AS totalRentasActivas,
 
   (SELECT COALESCE(SUM(pg.monto), 0)
-   FROM tblpedidos p
-   INNER JOIN tblpagos pg ON p.idPedido = pg.idPedido
-   WHERE LOWER(p.estadoActual) IN (
-     'procesando',
-     'confirmado',
-     'enviando',
-     'en alquiler',
-     'devuelto',
-     'incompleto',
-     'incidente'
-   )
-   AND pg.estadoPago = 'completado'
-   AND MONTH(p.fechaInicio) = MONTH(CURRENT_DATE())
-   AND YEAR(p.fechaInicio) = YEAR(CURRENT_DATE())
+   FROM tblpagos pg
+   WHERE pg.estadoPago = 'completado'
+   AND MONTH(pg.fechaPago) = MONTH(CURRENT_DATE())
+   AND YEAR(pg.fechaPago) = YEAR(CURRENT_DATE())
   ) AS ingresosMes,
 
   (SELECT COUNT(*)
    FROM tblpedidos p
    WHERE LOWER(p.estadoActual) = 'finalizado'
   ) AS totalPedidosFinalizados;
+
     `);
 
     res.json(usuarios);
