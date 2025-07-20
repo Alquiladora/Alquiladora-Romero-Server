@@ -1105,51 +1105,6 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
 
 
 
-routerPedidos.get("/check-id-rastreo/:idRastreo", csrfProtection, async (req, res) => {
-  const { idRastreo } = req.params;
-
-  try {
- 
-    const [rows] = await pool.query(
-      `
-      SELECT idPedido
-      FROM tblpedidos
-      WHERE idRastreo = ? and idNoClientes is not null
-      LIMIT 1
-      `,
-      [idRastreo]
-    );
-
-    if (rows.length > 0) {
-
-      return res.status(200).json({
-        success: true,
-        exists: true,
-        idPedido: rows[0].idPedido,
-      });
-    } else {
-      
-      return res.status(200).json({
-        success: true,
-        exists: false,
-      });
-    }
-  } catch (error) {
-    console.error("Error al verificar idRastreo:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Error al verificar el ID de rastreo",
-      error: error.message,
-    });
-  }
-});
-
-
-
-
-
-
-
 routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
   try {
     const { idRastreo } = req.params;
@@ -1162,53 +1117,84 @@ routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
       });
     }
 
-    // Obtener idPedido y estado actual
-    const [orders] = await pool.query(
+    // Verificar si el idRastreo existe
+    const [checkRows] = await pool.query(
       `
-      SELECT 
-        idPedido,
-        idRastreo,
-        CONCAT(UCASE(LEFT(estadoActual,1)), LCASE(SUBSTRING(estadoActual,2))) AS estado,
-        fechaInicio,
-        fechaEntrega,
-        detallesPago
+      SELECT idPedido
       FROM tblpedidos
-      WHERE idRastreo = ?
+      WHERE idRastreo = ? AND (idNoClientes IS NOT NULL OR idUsuarios IS NOT NULL)
+      LIMIT 1
       `,
       [idRastreo]
     );
 
-    if (orders.length === 0) {
+    if (checkRows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "No se encontró un pedido con ese ID de rastreo",
       });
     }
 
-    const order = orders[0];
+    const order = checkRows[0];
 
-    // Consultar historial en tblhistorialestados
-    const [historyRows] = await pool.query(
+    // Obtener detalles del pedido
+    const [orderDetails] = await pool.query(
       `
       SELECT 
-        CONCAT(UCASE(LEFT(estadoNuevo,1)), LCASE(SUBSTRING(estadoNuevo,2))) AS state,
-        DATE_FORMAT(fechaActualizacion, '%Y-%m-%d %H:%i:%s') AS date,
-        CONCAT('El pedido cambió a ', CONCAT(UCASE(LEFT(estadoNuevo,1)), LCASE(SUBSTRING(estadoNuevo,2))), 
-               COALESCE(CONCAT(' desde ', CONCAT(UCASE(LEFT(estadoAnterior,1)), LCASE(SUBSTRING(estadoAnterior,2)))), '')) AS description
-      FROM tblhistorialestados
-      WHERE idPedido = ?
-      ORDER BY fechaActualizacion ASC
+        idPedido,
+        idRastreo,
+        CONCAT(UCASE(LEFT(estadoActual, 1)), LCASE(SUBSTRING(estadoActual, 2))) AS estado,
+        fechaInicio,
+        fechaEntrega,
+        detallesPago,
+        totalPagar
+      FROM tblpedidos
+      WHERE idRastreo = ?
       `,
-      [order.idPedido]
+      [idRastreo]
     );
 
-    // Si no hay historial, devolver array vacío
+    if (orderDetails.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No se encontraron detalles del pedido",
+      });
+    }
+
+    const orderData = orderDetails[0];
+
+    // Obtener historial completo
+   const [historyRows] = await pool.query(
+  `
+  SELECT
+    CONCAT(UCASE(LEFT(estadoNuevo, 1)), LCASE(SUBSTRING(estadoNuevo, 2))) AS estadoNuevo,
+    CONCAT(UCASE(LEFT(estadoAnterior, 1)), LCASE(SUBSTRING(estadoAnterior, 2))) AS estadoAnterior,
+    DATE_FORMAT(fechaActualizacion, '%Y-%m-%d %H:%i:%s') AS fecha,
+    CONCAT('El pedido cambió a ',
+           CONCAT(UCASE(LEFT(estadoNuevo, 1)), LCASE(SUBSTRING(estadoNuevo, 2))),
+           COALESCE(CONCAT(' desde ',
+           CONCAT(UCASE(LEFT(estadoAnterior, 1)), LCASE(SUBSTRING(estadoAnterior, 2)))), ''))
+    AS descripcion
+  FROM tblhistorialestados
+  WHERE idPedido = ?
+  ORDER BY fechaActualizacion ASC
+  `,
+  [order.idPedido]
+);
+
+
     const history = historyRows.length > 0 ? historyRows : [];
 
-    // Construir respuesta
+    // Respuesta con success explícito
     const response = {
-      id: order.idRastreo,
-      status: order.estado,
+      success: true,
+      id: orderData.idRastreo,
+      status: orderData.estado,
+      trackingId: orderData.idRastreo,
+      fechaInicio: orderData.fechaInicio,
+      fechaEntrega: orderData.fechaEntrega,
+      totalPagar: orderData.totalPagar,
+      detallesPago: orderData.detallesPago,
       history: history,
     };
 
@@ -1222,7 +1208,6 @@ routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
     });
   }
 });
-
 
 
 //Enpot de historial de pedidos
