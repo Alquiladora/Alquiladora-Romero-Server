@@ -284,7 +284,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Crear la cookie de sesión
     res.cookie("sesionToken", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "local",
       sameSite: "None",
       maxAge: TOKEN_EXPIRATION_TIME,
     });
@@ -645,7 +645,7 @@ usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res)
     }
     res.clearCookie("sesionToken", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "local",
       sameSite: "None",
     });
     console.log("sesion cerrada correctamente");

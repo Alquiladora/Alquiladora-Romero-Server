@@ -13,29 +13,29 @@ const { listeners } = require("process");
 const { route } = require("./clssesiones");
 const { getIO, getUserSockets } = require("../config/socket");
 const { Console } = require("console");
-const { verifyToken } = require('./clsUsuarios');
+const { verifyToken } = require("./clsUsuarios");
+const axios = require("axios");
 
 const routerCarrito = express.Router();
 routerCarrito.use(express.json());
 routerCarrito.use(cookieParser());
 
+routerCarrito.get("/carrito/:idUsuario", verifyToken, async (req, res) => {
+  const { idUsuario } = req.params;
 
-routerCarrito.get("/carrito/:idUsuario",verifyToken, async (req, res) => {
-    const { idUsuario } = req.params;
+  if (!idUsuario) {
+    return res.status(400).json({
+      success: false,
+      message: "El ID del usuario es requerido",
+    });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    if (!idUsuario) {
-        return res.status(400).json({
-            success: false,
-            message: "El ID del usuario es requerido",
-        });
-    }
-    let connection;
-    try {
-        connection = await pool.getConnection();
-        await connection.beginTransaction();
-
-        const [rows] = await connection.query(
-            `
+    const [rows] = await connection.query(
+      `
         SELECT 
     u.idUsuarios, 
     u.correo, 
@@ -69,267 +69,412 @@ WHERE u.idUsuarios = ?
 GROUP BY ca.idCarrito, p.idProducto, pc.idProductoColores, i.idProductoColor;
 
         `,
-            [idUsuario]
-        );
+      [idUsuario]
+    );
 
-        if (rows.length === 0) {
-            await connection.commit();
-            return res.status(200).json({
-                success: true,
-                message: "El carrito está vacío",
-                carrito: [],
-                expiredCount: 0,
-            });
-        }
+    if (rows.length === 0) {
+      await connection.commit();
+      return res.status(200).json({
+        success: true,
+        message: "El carrito está vacío",
+        carrito: [],
+        expiredCount: 0,
+      });
+    }
 
-        const currentDate = new Date();
+    const currentDate = new Date();
 
-        const expiredItems = [];
-        const validItems = [];
+    const expiredItems = [];
+    const validItems = [];
 
-        for (const item of rows) {
-            const fechaAgregado = new Date(item.fechaAgregado);
-            const expirationDate = new Date(fechaAgregado);
+    for (const item of rows) {
+      const fechaAgregado = new Date(item.fechaAgregado);
+      const expirationDate = new Date(fechaAgregado);
 
+      expirationDate.setFullYear(fechaAgregado.getFullYear() + 1);
 
-            expirationDate.setFullYear(fechaAgregado.getFullYear() + 1);
+      if (currentDate > expirationDate) {
+        expiredItems.push(item);
+      } else {
+        validItems.push(item);
+      }
+    }
 
+    for (const item of expiredItems) {
+      const { idCarrito, idProductoColores, cantidad } = item;
 
-            if (currentDate > expirationDate) {
-                expiredItems.push(item);
-            } else {
-                validItems.push(item);
-            }
-        }
-
-        for (const item of expiredItems) {
-            const { idCarrito, idProductoColores, cantidad } = item;
-
-            await connection.query("DELETE FROM tblcarrito WHERE idCarrito = ?", [
-                idCarrito,
-            ]);
-            await connection.query(
-                `UPDATE tblinventario i 
+      await connection.query("DELETE FROM tblcarrito WHERE idCarrito = ?", [
+        idCarrito,
+      ]);
+      await connection.query(
+        `UPDATE tblinventario i 
            JOIN tblbodegas b ON i.idBodega = b.idBodega   
                i.stockReservado = i.stockReservado - ? 
            WHERE i.idProductoColor = ? 
              AND b.es_principal = 1`,
-                [cantidad, idProductoColores]
-            );
-        }
-
-        await connection.commit();
-
-        res.status(200).json({
-            success: true,
-            carrito: validItems,
-            expiredCount: expiredItems.length,
-        });
-    } catch (error) {
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error("Error during rollback:", rollbackError);
-            }
-        }
-
-        console.error("❌ Error al obtener el carrito:", error.stack);
-        res.status(500).json({
-            success: false,
-            message: "Error interno del servidor",
-            error: error.message,
-        });
-    } finally {
-        if (connection) {
-            try {
-                await connection.release();
-            } catch (releaseError) {
-                console.error("Error releasing connection:", releaseError);
-            }
-        }
+        [cantidad, idProductoColores]
+      );
     }
+
+    await connection.commit();
+
+    res.status(200).json({
+      success: true,
+      carrito: validItems,
+      expiredCount: expiredItems.length,
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("Error during rollback:", rollbackError);
+      }
+    }
+
+    console.error("❌ Error al obtener el carrito:", error.stack);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+      error: error.message,
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.release();
+      } catch (releaseError) {
+        console.error("Error releasing connection:", releaseError);
+      }
+    }
+  }
 });
 
-routerCarrito.post("/agregar",verifyToken, async (req, res) => {
-    const { idUsuario, idProductoColor, cantidad, precioAlquiler } = req.body;
+routerCarrito.post("/agregar", verifyToken, async (req, res) => {
+  const { idUsuario, idProductoColor, cantidad, precioAlquiler } = req.body;
+  if (
+    !idUsuario ||
+    !idProductoColor ||
+    !cantidad ||
+    cantidad <= 0 ||
+    !precioAlquiler
+  ) {
+    return res.status(400).json({ mensaje: "Datos inválidos" });
+  }
 
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
 
-    if (
-        !idUsuario ||
-        !idProductoColor ||
-        !cantidad ||
-        cantidad <= 0 ||
-        !precioAlquiler
-    ) {
-        return res.status(400).json({ mensaje: "Datos inválidos" });
-    }
+    console.log(
+      "Datos recibidos",
+      idUsuario,
+      idProductoColor,
+      cantidad,
+      precioAlquiler
+    );
 
-    const connection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
-
-        const [inventario] = await connection.query(
-            ` SELECT i.stock, i.stockReservado 
+    const [inventario] = await connection.query(
+      ` SELECT i.stock, i.stockReservado 
         FROM tblinventario i 
         JOIN tblbodegas b ON i.idBodega = b.idBodega  
         WHERE i.idProductoColor = ?
         AND b.es_principal = 1 
         FOR UPDATE; 
       `,
-            [idProductoColor]
-        );
+      [idProductoColor]
+    );
 
-        if (inventario.length === 0 || inventario[0].stock < cantidad) {
-            await connection.rollback();
-            return res.status(400).json({ mensaje: "Stock insuficiente" });
-        }
-
-        // await connection.query(
-        //   "UPDATE tblinventario i JOIN tblbodegas b ON i.idBodega = b.idBodega SET i.stock = stock - ?, i.stockReservado = stockReservado + ? WHERE i.idProductoColor = ? AND b.es_principal = 1",
-        //   [cantidad, cantidad, idProductoColor]
-        // );
-
-        await connection.query(
-            "UPDATE tblinventario i JOIN tblbodegas b ON i.idBodega = b.idBodega SET  i.stockReservado = stockReservado + ? WHERE i.idProductoColor = ? AND b.es_principal = 1",
-            [cantidad, idProductoColor]
-        );
-
-
-
-        await connection.query(
-            "INSERT INTO tblcarrito (idUsuario, idProductoColor, cantidad, precioAntes,precioProducto, fechaAgregado) VALUES (?, ?, ?, ?,?, NOW())",
-            [idUsuario, idProductoColor, cantidad, precioAlquiler, precioAlquiler]
-        );
-
-        await connection.commit();
-
-
-        const userSockets = getUserSockets();
-        console.log("Usuarios conectados:", Object.keys(userSockets));
-
-        if (userSockets[idUsuario]) {
-            console.log(`Emitiendo 'productoAgregadoCarrito' al usuario ${idUsuario}`);
-            userSockets[idUsuario].emit("productoAgregadoCarrito", {
-                idProductoColor,
-                cantidad,
-                precioAlquiler,
-                mensaje: "✅ Producto agregado al carrito correctamente.",
-            });
-        } else {
-            console.log(`Usuario ${idUsuario} no está conectado al socket`);
-        }
-
-
-        res
-            .status(201)
-            .json({ success: true, mensaje: "Producto agregado al carrito" });
-    } catch (error) {
-        await connection.rollback();
-        console.error("Error al agregar al carrito:", error);
-        res.status(500).json({ mensaje: "Error al agregar producto", error });
-    } finally {
-        connection.release();
+    if (inventario.length === 0 || inventario[0].stock < cantidad) {
+      await connection.rollback();
+      return res.status(400).json({ mensaje: "Stock insuficiente" });
     }
+
+    // await connection.query(
+    //   "UPDATE tblinventario i JOIN tblbodegas b ON i.idBodega = b.idBodega SET i.stock = stock - ?, i.stockReservado = stockReservado + ? WHERE i.idProductoColor = ? AND b.es_principal = 1",
+    //   [cantidad, cantidad, idProductoColor]
+    // );
+
+    await connection.query(
+      "UPDATE tblinventario i JOIN tblbodegas b ON i.idBodega = b.idBodega SET  i.stockReservado = stockReservado + ? WHERE i.idProductoColor = ? AND b.es_principal = 1",
+      [cantidad, idProductoColor]
+    );
+
+    await connection.query(
+      "INSERT INTO tblcarrito (idUsuario, idProductoColor, cantidad, precioAntes,precioProducto, fechaAgregado) VALUES (?, ?, ?, ?,?, NOW())",
+      [idUsuario, idProductoColor, cantidad, precioAlquiler, precioAlquiler]
+    );
+
+    await connection.commit();
+
+    // En tu routerCarrito.js, dentro de la ruta routerCarrito.post("/agregar", ...)
+    // En tu routerCarrito.js, dentro de la ruta routerCarrito.post("/agregar", ...)
+
+    let recomendaciones = [];
+    try {
+      console.log("Iniciando proceso de recomendación...");
+      const [itemsActuales] = await connection.query(
+        `SELECT DISTINCT p.nombre 
+         FROM tblcarrito ca
+         JOIN tblproductoscolores pc ON ca.idProductoColor = pc.idProductoColores
+         JOIN tblproductos p ON pc.idProducto = p.idProducto
+         WHERE ca.idUsuario = ?`,
+        [idUsuario]
+      );
+      const nombresDeProductosEnCarrito = itemsActuales.map(
+        (item) => item.nombre
+      );
+
+      console.log(
+        "Productos en carrito para recomendación:",
+        nombresDeProductosEnCarrito
+      );
+
+      if (nombresDeProductosEnCarrito.length > 0) {
+        const responseRecomendador = await axios.post(
+          "https://modelorecomendacion-l6os.onrender.com/recomendar",
+          {
+            productos: nombresDeProductosEnCarrito,
+          }
+        );
+        console.log(
+          "Respuesta de la API de Python:",
+          responseRecomendador.data
+        );
+        const nombresRecomendados = responseRecomendador.data.recomendaciones;
+
+        if (nombresRecomendados && nombresRecomendados.length > 0) {
+          console.log("Nombres recomendados recibidos:", nombresRecomendados);
+          const [productosRecomendados] = await connection.query(
+            `SELECT 
+    p.idProducto, 
+    p.nombre, 
+    p.detalles, 
+    pr.precioAlquiler,
+    pc.idProductoColores,
+    GROUP_CONCAT(DISTINCT c.color ORDER BY c.color SEPARATOR ', ') AS coloresDisponibles,
+    (SELECT urlFoto FROM tblfotosproductos WHERE idProducto = p.idProducto LIMIT 1) AS imagenProducto,
+    SUM(COALESCE(i.stock, 0)) AS stockDisponible,
+    
+   
+    sc.nombre AS nombreSubcategoria,
+    cat.nombre AS nombreCategoria
+
+FROM tblproductos p
+JOIN tblproductoscolores pc ON p.idProducto = pc.idProducto
+JOIN tblcolores c ON pc.idColor = c.idColores
+JOIN tblprecio pr ON p.idProducto = pr.idProducto
+LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+
+
+JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
+
+WHERE p.nombre IN (?)
+GROUP BY 
+    p.idProducto, p.nombre, p.detalles, pr.precioAlquiler, imagenProducto, 
+    sc.nombre, cat.nombre
+HAVING stockDisponible > 0;
+`,
+            [nombresRecomendados]
+          );
+          recomendaciones = productosRecomendados;
+        } else {
+          console.log("La API de Python no devolvió recomendaciones.");
+        }
+      }
+    } catch (recomendacionError) {
+      console.error(
+        "Error DURANTE el proceso de recomendación:",
+        recomendacionError.message
+      );
+    }
+
+    const userSockets = getUserSockets();
+    console.log("Usuarios conectados:", Object.keys(userSockets));
+
+    if (userSockets[idUsuario]) {
+      console.log(
+        `Emitiendo 'productoAgregadoCarrito' al usuario ${idUsuario}`
+      );
+      userSockets[idUsuario].emit("productoAgregadoCarrito", {
+        idProductoColor,
+        cantidad,
+        precioAlquiler,
+        mensaje: "✅ Producto agregado al carrito correctamente.",
+      });
+    } else {
+      console.log(`Usuario ${idUsuario} no está conectado al socket`);
+    }
+    console.log("Resuulya¿tado de recoendaciones", recomendaciones);
+
+    res.status(201).json({
+      success: true,
+      mensaje: "Producto agregado al carrito",
+      recomendaciones: recomendaciones,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error("Error al agregar al carrito:", error);
+    res.status(500).json({ mensaje: "Error al agregar producto", error });
+  } finally {
+    connection.release();
+  }
 });
 
-//Contar cuando productos tiene en el carrito 
-routerCarrito.get("/count/:idUsuario",verifyToken, async (req, res) => {
-    const { idUsuario } = req.params;
-    try {
-        const [rows] = await pool.query(
-            "SELECT COUNT(*) as count FROM tblcarrito WHERE idUsuario = ?",
-            [idUsuario]
-        );
-        res.json({ count: rows[0].count });
-    } catch (error) {
-        console.error("Error fetching cart count:", error);
-        res.status(500).json({ mensaje: "Error al obtener el conteo del carrito" });
-    }
+//Contar cuando productos tiene en el carrito
+routerCarrito.get("/count/:idUsuario", verifyToken, async (req, res) => {
+  const { idUsuario } = req.params;
+  try {
+    const [rows] = await pool.query(
+      "SELECT COUNT(*) as count FROM tblcarrito WHERE idUsuario = ?",
+      [idUsuario]
+    );
+    res.json({ count: rows[0].count });
+  } catch (error) {
+    console.error("Error fetching cart count:", error);
+    res.status(500).json({ mensaje: "Error al obtener el conteo del carrito" });
+  }
 });
 
 //Eliminar del carrito
-routerCarrito.delete("/eliminar/:idCarrito",verifyToken, async (req, res) => {
-    const { idCarrito } = req.params;
-    const {idUsuario}= req.body;
+routerCarrito.delete("/eliminar/:idCarrito", verifyToken, async (req, res) => {
+  const { idCarrito } = req.params;
+  const { idUsuario } = req.body;
 
-    console.log("Id del carrito a eliminar:", idCarrito);
-    console.log("Id del usuario:", idUsuario);
+  console.log("Id del carrito a eliminar:", idCarrito);
+  console.log("Id del usuario:", idUsuario);
 
-    if (!idUsuario) {
-        return res.status(400).json({ mensaje: "Falta el idUsuario en el cuerpo de la solicitud" });
-      }
+  if (!idUsuario) {
+    return res
+      .status(400)
+      .json({ mensaje: "Falta el idUsuario en el cuerpo de la solicitud" });
+  }
 
-    let connection;
-    try {
-        connection = await pool.getConnection();
+  let connection;
+  try {
+    connection = await pool.getConnection();
 
-        await connection.beginTransaction();
+    await connection.beginTransaction();
 
-        const [carritoItem] = await connection.query(
-            "SELECT idProductoColor, cantidad FROM tblcarrito WHERE idCarrito = ?",
-            [idCarrito]
-        );
 
-        if (carritoItem.length === 0) {
-            return res
-                .status(404)
-                .json({ mensaje: "El producto no existe en el carrito" });
-        }
 
-        const { idProductoColor, cantidad } = carritoItem[0];
+    const [carritoItem] = await connection.query(
+      "SELECT idProductoColor, cantidad FROM tblcarrito WHERE idCarrito = ?",
+      [idCarrito]
+    );
 
-        const [inventario] = await connection.query(
-            `SELECT i.stock, i.stockReservado 
+    if (carritoItem.length === 0) {
+      return res
+        .status(404)
+        .json({ mensaje: "El producto no existe en el carrito" });
+    }
+
+    const { idProductoColor, cantidad } = carritoItem[0];
+
+    const [inventario] = await connection.query(
+      `SELECT i.stock, i.stockReservado 
          FROM tblinventario i
          JOIN tblbodegas b ON i.idBodega = b.idBodega
          WHERE i.idProductoColor = ? 
          AND b.es_principal = 1`,
-            [idProductoColor]
-        );
+      [idProductoColor]
+    );
 
-        if (inventario.length === 0) {
-            throw new Error("Producto no encontrado en el inventario");
-        }
+    if (inventario.length === 0) {
+      throw new Error("Producto no encontrado en el inventario");
+    }
 
-        const { stock, stockReservado } = inventario[0];
-        console.log("Datos del inventario:", { stock, stockReservado });
+    const { stock, stockReservado } = inventario[0];
+    console.log("Datos del inventario:", { stock, stockReservado });
 
-        // Validar que stockReservado no baje de 0
-        if (stockReservado < cantidad) {
-            return res.status(400).json({
-                success: false,
-                mensaje: "El stock reservado no puede ser menor a 0. Cantidad reservada insuficiente.",
-            });
-        }
-        // await connection.query(
-        //   `UPDATE tblinventario i 
-        //      JOIN tblbodegas b ON i.idBodega = b.idBodega  
-        //      SET i.stock = i.stock + ?, 
-        //          i.stockReservado = i.stockReservado - ? 
-        //      WHERE i.idProductoColor = ? 
-        //      AND b.es_principal = 1;`,
-        //   [cantidad, cantidad, idProductoColor]
-        // );
+    // Validar que stockReservado no baje de 0
+    if (stockReservado < cantidad) {
+      return res.status(400).json({
+        success: false,
+        mensaje:
+          "El stock reservado no puede ser menor a 0. Cantidad reservada insuficiente.",
+      });
+    }
+    // await connection.query(
+    //   `UPDATE tblinventario i
+    //      JOIN tblbodegas b ON i.idBodega = b.idBodega
+    //      SET i.stock = i.stock + ?,
+    //          i.stockReservado = i.stockReservado - ?
+    //      WHERE i.idProductoColor = ?
+    //      AND b.es_principal = 1;`,
+    //   [cantidad, cantidad, idProductoColor]
+    // );
 
-        await connection.query("DELETE FROM tblcarrito WHERE idCarrito = ?", [
-            idCarrito,
-        ]);
+    await connection.query("DELETE FROM tblcarrito WHERE idCarrito = ?", [
+      idCarrito,
+    ]);
 
-        await connection.query(
-            `UPDATE tblinventario i 
+    await connection.query(
+      `UPDATE tblinventario i 
          JOIN tblbodegas b ON i.idBodega = b.idBodega   
          SET i.stockReservado = i.stockReservado - ? 
          WHERE i.idProductoColor = ? 
          AND b.es_principal = 1`,
-            [cantidad, idProductoColor]
-        );
+      [cantidad, idProductoColor]
+    );
 
-        await connection.commit();
+    await connection.commit();
 
-        const userSockets = getUserSockets();
-        
-       if (userSockets[idUsuario]) {
+
+     // --- INICIO: RECALCULAR RECOMENDACIONES ---
+        let recomendaciones = [];
+        try {
+            // 1. Obtener la lista actualizada de productos que QUEDAN en el carrito
+            const [itemsActuales] = await connection.query(
+                `SELECT DISTINCT p.nombre 
+                 FROM tblcarrito ca
+                 JOIN tblproductoscolores pc ON ca.idProductoColor = pc.idProductoColores
+                 JOIN tblproductos p ON pc.idProducto = p.idProducto
+                 WHERE ca.idUsuario = ?`,
+                [idUsuario]
+            );
+
+            // 2. Si todavía quedan productos, pedir nuevas recomendaciones
+            if (itemsActuales.length > 0) {
+                const nombresDeProductosEnCarrito = itemsActuales.map(item => item.nombre);
+                console.log("Productos restantes para recalcular recomendaciones:", nombresDeProductosEnCarrito);
+
+                const responseRecomendador = await axios.post('https://modelorecomendacion-l6os.onrender.com/recomendar', {
+                    productos: nombresDeProductosEnCarrito
+                });
+                
+                const nombresRecomendados = responseRecomendador.data.recomendaciones;
+
+                // 3. Obtener detalles de las nuevas recomendaciones
+                if (nombresRecomendados && nombresRecomendados.length > 0) {
+                    const [productosRecomendados] = await connection.query(
+                        `SELECT 
+                            p.idProducto, p.nombre, p.detalles, pr.precioAlquiler,
+                            GROUP_CONCAT(DISTINCT c.color ORDER BY c.color SEPARATOR ', ') AS coloresDisponibles,
+                            (SELECT urlFoto FROM tblfotosproductos WHERE idProducto = p.idProducto LIMIT 1) AS imagenProducto,
+                            SUM(i.stock) AS stockDisponible
+                         FROM tblproductos p
+                         JOIN tblproductoscolores pc ON p.idProducto = pc.idProducto
+                         JOIN tblcolores c ON pc.idColor = c.idColores
+                         JOIN tblprecio pr ON p.idProducto = pr.idProducto
+                         LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+                         WHERE p.nombre IN (?)
+                         GROUP BY p.idProducto
+                         HAVING stockDisponible > 0;`,
+                        [nombresRecomendados]
+                    );
+                    recomendaciones = productosRecomendados;
+                }
+            } else {
+                console.log("El carrito está vacío, no se piden recomendaciones.");
+            }
+        } catch (recomendacionError) {
+            console.error("Error al recalcular recomendaciones:", recomendacionError.message);
+        }
+
+    const userSockets = getUserSockets();
+
+    if (userSockets[idUsuario]) {
       userSockets[idUsuario].emit("productoEliminadoCarrito", {
         idProductoColor,
         cantidad,
@@ -339,221 +484,244 @@ routerCarrito.delete("/eliminar/:idCarrito",verifyToken, async (req, res) => {
       console.log(`No se encontró socket para el usuario ${idUsuario}`);
     }
 
-        res
-            .status(200)
-            .json({ success: true, mensaje: "Producto eliminado del carrito" });
-    } catch (error) {
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error("Error during rollback:", rollbackError);
-            }
-        }
-        console.error("Error al eliminar producto del carrito:", error);
-        res.status(500).json({ mensaje: "Error al eliminar producto", error });
-    } finally {
-        if (connection) {
-            try {
-                await connection.release();
-            } catch (releaseError) {
-                console.error("Error releasing connection:", releaseError);
-            }
-        }
+    res
+      .status(200)
+      .json({ success: true, mensaje: "Producto eliminado del carrito" ,recomendaciones: recomendaciones });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("Error during rollback:", rollbackError);
+      }
     }
+    console.error("Error al eliminar producto del carrito:", error);
+    res.status(500).json({ mensaje: "Error al eliminar producto", error });
+  } finally {
+    if (connection) {
+      try {
+        await connection.release();
+      } catch (releaseError) {
+        console.error("Error releasing connection:", releaseError);
+      }
+    }
+  }
 });
 
 //Acatualizar
-routerCarrito.put("/actualizar/:idCarrito",verifyToken, async (req, res) => {
-    const { idCarrito } = req.params;
-    const { cantidad } = req.body;
-    let connection;
+routerCarrito.put("/actualizar/:idCarrito", verifyToken, async (req, res) => {
+  const { idCarrito } = req.params;
+  const { cantidad } = req.body;
+  let connection;
 
-    if (!cantidad || cantidad <= 0) {
-        return res
-            .status(400)
-            .json({ success: false, mensaje: "La cantidad debe ser mayor a 0." });
+  if (!cantidad || cantidad <= 0) {
+    return res
+      .status(400)
+      .json({ success: false, mensaje: "La cantidad debe ser mayor a 0." });
+  }
+
+  try {
+    connection = await pool.getConnection();
+
+    await connection.beginTransaction();
+
+    const [carritoItem] = await connection.query(
+      "SELECT ca.idProductoColor, ca.cantidad FROM tblcarrito ca WHERE ca.idCarrito = ?",
+      [idCarrito]
+    );
+
+    if (carritoItem.length === 0) {
+      throw new Error("Producto no encontrado en el carrito");
     }
 
-    try {
-        connection = await pool.getConnection();
+    const { idProductoColor, cantidad: cantidadActual } = carritoItem[0];
+    console.log("Datos del carrito:", {
+      idCarrito,
+      idProductoColor,
+      cantidadActual,
+      nuevaCantidad: cantidad,
+    });
 
-        await connection.beginTransaction();
-
-        const [carritoItem] = await connection.query(
-            "SELECT ca.idProductoColor, ca.cantidad FROM tblcarrito ca WHERE ca.idCarrito = ?",
-            [idCarrito]
-        );
-
-        if (carritoItem.length === 0) {
-            throw new Error("Producto no encontrado en el carrito");
-        }
-
-        const { idProductoColor, cantidad: cantidadActual } = carritoItem[0];
-        console.log("Datos del carrito:", {
-            idCarrito,
-            idProductoColor,
-            cantidadActual,
-            nuevaCantidad: cantidad,
-        });
-
-        const [inventario] = await connection.query(
-            `SELECT 
+    const [inventario] = await connection.query(
+      `SELECT 
            i.stock, 
            i.stockReservado 
          FROM tblinventario i
          JOIN tblbodegas b ON i.idBodega = b.idBodega
          WHERE i.idProductoColor = ? 
            AND b.es_principal = 1`,
-            [idProductoColor]
-        );
+      [idProductoColor]
+    );
 
-        if (inventario.length === 0) {
-            throw new Error("Producto no encontrado en el inventario");
-        }
+    if (inventario.length === 0) {
+      throw new Error("Producto no encontrado en el inventario");
+    }
 
-        const { stock, stockReservado } = inventario[0];
+    const { stock, stockReservado } = inventario[0];
 
-        console.log("Datos del inventario:", { stock, stockReservado });
+    console.log("Datos del inventario:", { stock, stockReservado });
 
-        const stockDisponible = stock - stockReservado;
+    const stockDisponible = stock - stockReservado;
 
-        console.log("Stok disponible", stockDisponible);
-        console.log("Stok cantidad actual", cantidadActual);
-        console.log("Stok cantidad a", cantidad);
+    console.log("Stok disponible", stockDisponible);
+    console.log("Stok cantidad actual", cantidadActual);
+    console.log("Stok cantidad a", cantidad);
 
-        const diferenciaCantidad = cantidad - cantidadActual;
-        if (diferenciaCantidad > 0 && diferenciaCantidad > stockDisponible) {
-            await connection.rollback();
-            return res.status(400).json({
-                success: false,
-                mensaje: "La cantidad solicitada excede el stock disponible.",
-            });
-        }
+    const diferenciaCantidad = cantidad - cantidadActual;
+    if (diferenciaCantidad > 0 && diferenciaCantidad > stockDisponible) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        mensaje: "La cantidad solicitada excede el stock disponible.",
+      });
+    }
+
+    await connection.query(
+      "UPDATE tblcarrito SET cantidad = ? WHERE idCarrito = ?",
+      [cantidad, idCarrito]
+    );
+
+    if (cantidad > cantidadActual) {
+      const cantidadAAgregar = cantidad - cantidadActual;
+      console.log("Datos de agregar cantidad disponible", cantidadAAgregar);
+
+      if (cantidad > cantidadActual) {
+        const cantidadAAgregar = cantidad - cantidadActual;
+        console.log("Cantidad a agregar al stockReservado:", cantidadAAgregar);
 
         await connection.query(
-            "UPDATE tblcarrito SET cantidad = ? WHERE idCarrito = ?",
-            [cantidad, idCarrito]
-        );
-
-
-        if (cantidad > cantidadActual) {
-            const cantidadAAgregar = cantidad - cantidadActual;
-            console.log("Datos de agregar cantidad disponible", cantidadAAgregar);
-
-            if (cantidad > cantidadActual) {
-                const cantidadAAgregar = cantidad - cantidadActual;
-                console.log("Cantidad a agregar al stockReservado:", cantidadAAgregar);
-
-                await connection.query(
-                    `UPDATE tblinventario i
+          `UPDATE tblinventario i
            JOIN tblbodegas b ON i.idBodega = b.idBodega
            SET i.stockReservado = i.stockReservado + ?
            WHERE i.idProductoColor = ?
            AND b.es_principal = 1`,
-                    [cantidadAAgregar, idProductoColor]
-                );
-            }
+          [cantidadAAgregar, idProductoColor]
+        );
+      }
 
-            //       await connection.query(
-            //         `UPDATE tblinventario i
-            //           JOIN tblbodegas b ON i.idBodega = b.idBodega
-            //           SET i.stock = i.stock - ?, 
-            //           i.stockReservado = i.stockReservado + ?
-            //           WHERE i.idProductoColor = ?
-            //           AND b.es_principal = 1;
-            //  `,
-            //         [cantidadAAgregar, cantidadAAgregar, idProductoColor]
-            //       );
+      //       await connection.query(
+      //         `UPDATE tblinventario i
+      //           JOIN tblbodegas b ON i.idBodega = b.idBodega
+      //           SET i.stock = i.stock - ?,
+      //           i.stockReservado = i.stockReservado + ?
+      //           WHERE i.idProductoColor = ?
+      //           AND b.es_principal = 1;
+      //  `,
+      //         [cantidadAAgregar, cantidadAAgregar, idProductoColor]
+      //       );
+    } else if (cantidad < cantidadActual) {
+      const cantidadAReducir = cantidadActual - cantidad;
 
+      console.log("Cantidad a reducir del stockReservado:", cantidadAReducir);
 
-        } else if (cantidad < cantidadActual) {
-            const cantidadAReducir = cantidadActual - cantidad;
-
-            console.log("Cantidad a reducir del stockReservado:", cantidadAReducir);
-
-            await connection.query(
-                `UPDATE tblinventario i
+      await connection.query(
+        `UPDATE tblinventario i
          JOIN tblbodegas b ON i.idBodega = b.idBodega
          SET i.stockReservado = i.stockReservado - ?
          WHERE i.idProductoColor = ?
          AND b.es_principal = 1`,
-                [cantidadAReducir, idProductoColor]
-            );
-        }
-
-        await connection.commit();
-        res
-            .status(200)
-            .json({ success: true, mensaje: "Cantidad actualizada correctamente." });
-    } catch (error) {
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error("Error during rollback:", rollbackError);
-            }
-        }
-
-        // Errores específicos
-        if (error.message === "Producto no encontrado en el carrito") {
-            return res.status(404).json({ success: false, mensaje: error.message });
-        }
-        if (error.message === "Producto no encontrado en el inventario") {
-            return res.status(404).json({ success: false, mensaje: error.message });
-        }
-        if (error.message === "La cantidad solicitada excede el stock disponible.") {
-            return res.status(400).json({ success: false, mensaje: error.message });
-        }
-        res
-            .status(500)
-            .json({
-                success: false,
-                mensaje: "Error interno del servidor",
-                error: error.message,
-            });
-    } finally {
-        if (connection) {
-            try {
-                await connection.release();
-            } catch (releaseError) {
-                console.error("Error releasing connection:", releaseError);
-            }
-        }
+        [cantidadAReducir, idProductoColor]
+      );
     }
+
+    await connection.commit();
+    res
+      .status(200)
+      .json({ success: true, mensaje: "Cantidad actualizada correctamente." });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("Error during rollback:", rollbackError);
+      }
+    }
+
+    // Errores específicos
+    if (error.message === "Producto no encontrado en el carrito") {
+      return res.status(404).json({ success: false, mensaje: error.message });
+    }
+    if (error.message === "Producto no encontrado en el inventario") {
+      return res.status(404).json({ success: false, mensaje: error.message });
+    }
+    if (
+      error.message === "La cantidad solicitada excede el stock disponible."
+    ) {
+      return res.status(400).json({ success: false, mensaje: error.message });
+    }
+    res.status(500).json({
+      success: false,
+      mensaje: "Error interno del servidor",
+      error: error.message,
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.release();
+      } catch (releaseError) {
+        console.error("Error releasing connection:", releaseError);
+      }
+    }
+  }
 });
 
-
 const generateNumericTrackingId = () => {
-    const timestamp = Date.now().toString();
-    const randomDigits = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
-    return `ROMERO-${timestamp}-${randomDigits}`;
-  };
+  const timestamp = Date.now().toString();
+  const randomDigits = Math.floor(Math.random() * 10000)
+    .toString()
+    .padStart(4, "0");
+  return `ROMERO-${timestamp}-${randomDigits}`;
+};
 
+const getMexicoCityTime = () => {
+  return moment().tz("America/Mexico_City").format("HH:mm:ss");
+};
 
-  const getMexicoCityTime = () => {
-    return moment().tz("America/Mexico_City").format("HH:mm:ss");
-  };
-  
+routerCarrito.post(
+  "/procesar",
+  csrfProtection,
+  verifyToken,
+  async (req, res) => {
+    const {
+      userId,
+      total,
+      direccion,
+      metodoPago,
+      rentalDate,
+      returnDate,
+      items,
+    } = req.body;
 
-  routerCarrito.post("/procesar", csrfProtection,verifyToken, async (req, res) => {
-    const { userId, total, direccion, metodoPago, rentalDate, returnDate, items } = req.body;
-  
-    
-    if (!userId || !total || !direccion || !metodoPago || !rentalDate || !returnDate || !items) {
-      console.log("Datos incompletos", { userId, total, direccion, metodoPago, rentalDate, returnDate, items });
-      return res.status(400).json({ success: false, message: "Datos incompletos." });
+    if (
+      !userId ||
+      !total ||
+      !direccion ||
+      !metodoPago ||
+      !rentalDate ||
+      !returnDate ||
+      !items
+    ) {
+      console.log("Datos incompletos", {
+        userId,
+        total,
+        direccion,
+        metodoPago,
+        rentalDate,
+        returnDate,
+        items,
+      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Datos incompletos." });
     }
-  
+
     const trackingId = generateNumericTrackingId();
     const fechaActual = moment().format("YYYY-MM-DD HH:mm:ss");
     const horaAlquiler = getMexicoCityTime();
-  
+
     try {
-  
       await pool.query("START TRANSACTION");
-  
-      
+
       const [procedureResult] = await pool.query(
         "CALL sp_procesar_pedido(?, ?, ?, ?, ?, ?, ?, ?, ?,?, @p_idPedido, @p_idPago, @p_error_message)",
         [
@@ -569,20 +737,24 @@ const generateNumericTrackingId = () => {
           trackingId,
         ]
       );
-  
+
       const [outParams] = await pool.query(
         "SELECT @p_idPedido AS p_idPedido, @p_idPago AS p_idPago, @p_error_message AS p_error_message"
       );
-  
+
       const { p_idPedido, p_idPago, p_error_message } = outParams[0];
-  
+
       if (p_error_message) {
         await pool.query("ROLLBACK");
-        console.log("Error al procesar el pedido", { userId, error: p_error_message });
-        return res.status(400).json({ success: false, message: p_error_message });
+        console.log("Error al procesar el pedido", {
+          userId,
+          error: p_error_message,
+        });
+        return res
+          .status(400)
+          .json({ success: false, message: p_error_message });
       }
-  
-     
+
       const paymentProcessors = {
         paypal: procesarPagoPayPal,
         debito: procesarPagoStripe,
@@ -592,42 +764,52 @@ const generateNumericTrackingId = () => {
         deposito: () => ({
           success: true,
           details: {
-            instructions: "Realiza tu depósito a la cuenta: Banco Ejemplo, Cuenta: 1234-5678-9012-3456, CLABE: 012345678901234567. Envía tu comprobante a pagos@alquiladora.com."
-          }
-        })
+            instructions:
+              "Realiza tu depósito a la cuenta: Banco Ejemplo, Cuenta: 1234-5678-9012-3456, CLABE: 012345678901234567. Envía tu comprobante a pagos@alquiladora.com.",
+          },
+        }),
       };
-  
+
       let estadoPago = "pendiente";
       let detallesPago = null;
-  
-    
+
       if (!paymentProcessors[metodoPago]) {
         await pool.query("ROLLBACK");
         throw new Error("Método de pago no soportado");
       }
-  
-      const paymentResponse = await paymentProcessors[metodoPago](total, p_idPedido);
-      
+
+      const paymentResponse = await paymentProcessors[metodoPago](
+        total,
+        p_idPedido
+      );
+
       if (paymentResponse.success) {
-        estadoPago = metodoPago === "spei" || metodoPago === "oxxo" || metodoPago === "deposito" 
-          ? "pendiente" 
-          : "completado";
+        estadoPago =
+          metodoPago === "spei" ||
+          metodoPago === "oxxo" ||
+          metodoPago === "deposito"
+            ? "pendiente"
+            : "completado";
         detallesPago = JSON.stringify(paymentResponse.details || {});
       } else {
         estadoPago = "fallido";
         detallesPago = JSON.stringify({ error: paymentResponse.error });
       }
-  
-     
+
       await pool.query(
         "UPDATE tblpagos SET estadoPago = ?, detallesPago = ? WHERE idPago = ?",
-        [estadoPago, detallesPago,  p_idPago]
+        [estadoPago, detallesPago, p_idPago]
       );
-  
+
       await pool.query("COMMIT");
-  
-      console.log("Pedido procesado exitosamente", { userId, idPedido: p_idPedido, idPago: p_idPago, trackingId });
-      
+
+      console.log("Pedido procesado exitosamente", {
+        userId,
+        idPedido: p_idPedido,
+        idPago: p_idPago,
+        trackingId,
+      });
+
       return res.status(201).json({
         success: true,
         idPedido: p_idPedido,
@@ -636,35 +818,46 @@ const generateNumericTrackingId = () => {
         estadoPago,
         detallesPago: detallesPago ? JSON.parse(detallesPago) : null,
       });
-  
     } catch (error) {
       await pool.query("ROLLBACK");
-      console.error("Error al procesar el pedido", { userId, error: error.message });
-      return res.status(500).json({ success: false, message: "Error al procesar el pedido." });
+      console.error("Error al procesar el pedido", {
+        userId,
+        error: error.message,
+      });
+      return res
+        .status(500)
+        .json({ success: false, message: "Error al procesar el pedido." });
     }
-  });
-  
- 
+  }
+);
 
+const procesarPagoPayPal = async (total, idPedido) => {
+  return {
+    success: true,
+    transactionId: "PAYPAL123",
+    payerEmail: "user@example.com",
+  };
+};
 
-  const procesarPagoPayPal = async (total, idPedido) => {
-    return { success: true, transactionId: "PAYPAL123", payerEmail: "user@example.com" };
+const procesarPagoStripe = async (total, idPedido) => {
+  return { success: true, paymentIntentId: "STRIPE123" };
+};
+
+const procesarPagoSPEI = async (total, idPedido) => {
+  return {
+    success: true,
+    clabe: "123456789012345678",
+    bank: "Banco Ejemplo",
+    reference: "REF123",
   };
-  
-  const procesarPagoStripe = async (total, idPedido) => {
-    return { success: true, paymentIntentId: "STRIPE123" };
-  };
-  
-  const procesarPagoSPEI = async (total, idPedido) => {
-    return { success: true, clabe: "123456789012345678", bank: "Banco Ejemplo", reference: "REF123" };
-  };
-  
-  const procesarPagoMercadoPago = async (total, idPedido) => {
-    return { success: true, paymentId: "MP123" };
-  };
-  
-  const procesarPagoOXXO = async (total, idPedido) => {
-    return { success: true, barcode: "OXXO123", reference: "REF456" };
-  };
+};
+
+const procesarPagoMercadoPago = async (total, idPedido) => {
+  return { success: true, paymentId: "MP123" };
+};
+
+const procesarPagoOXXO = async (total, idPedido) => {
+  return { success: true, barcode: "OXXO123", reference: "REF456" };
+};
 
 module.exports = routerCarrito;

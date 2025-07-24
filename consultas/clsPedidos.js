@@ -13,6 +13,10 @@ const moment = require("moment");
 const { listeners } = require("process");
 const { route } = require("./clssesiones");
 const {obtenerFechaMexico} = require("./clsUsuarios")
+const Stripe = require('stripe');
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const axios = require("axios");
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 const routerPedidos = express.Router();
 routerPedidos.use(express.json());
@@ -87,7 +91,7 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
       } = req.body;
 
 
-      console.log("DATOS RECIBIDOS", esClienteExistente, selectedDireccionId)
+      
   
    
       let crearDireccion = 0;
@@ -100,7 +104,6 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
         idDireccionExistente = selectedDireccionId;
       }
 
-      console.log("dirrecion crear", crearDireccion)
   
 
        const currentDateTime = moment()
@@ -154,7 +157,7 @@ if (esClienteExistente) {
 
     if (params.length > 0) {
         const [noClienteRows] = await pool.query(query + " LIMIT 1", params);
-        console.log("🔎 Datos recibidos de no cliente (no es cliente registrado):", noClienteRows);
+       
         if (noClienteRows.length > 0) {
             idCliente = noClienteRows[0].id;
         }
@@ -175,7 +178,7 @@ if (esClienteExistente) {
         [idCliente, idCliente]
       );
 
-      console.log("pedidos activos", pedidosActivos)
+  
       
         if (pedidosActivos[0].total >= 5) {
             return res.status(400).json({
@@ -223,23 +226,23 @@ if (esClienteExistente) {
   
 
 
-       console.log("datos de cls sp_crearpedido basico",values )
+   
   
       const [rows] = await pool.query(query, values);
-      console.log("datos recibidos", rows)
+   
       
       const result = rows[0][0];
 
-      console.log("resulatdos de resultados", result)
+   
 
       const newIdPedido = result.newIdPedido;
-       console.log("resulatdos de newIdPedido", newIdPedido)
+  
   
       
       for (const item of lineItems) {
 
 
-        console.log(item);
+ 
 
         const insertDetalle = `
           INSERT INTO tblpedidodetalles (
@@ -288,7 +291,7 @@ if (esClienteExistente) {
 routerPedidos.post("/pagos/registrar", csrfProtection, async (req, res) => {
   try {
     const { idPedido, monto, formaPago, metodoPago, detallesPago } = req.body;
-    console.log("Datos recibidos pagos", idPedido);
+
 
     if (!idPedido || !monto || !formaPago || !metodoPago) {
       return res.status(400).json({
@@ -653,8 +656,6 @@ routerPedidos.get("/pedidos-incidentes", csrfProtection, async (req, res) => {
       const productosStrArray = pedido.productosAlquilados ? pedido.productosAlquilados.split(' | ') : [];
       const imagenesStrArray = pedido.imagenesProductos ? pedido.imagenesProductos.split(',') : [];
 
-      console.log('productosAlquilados:', pedido.productosAlquilados); // Para depuración
-      console.log('imagenesProductos:', pedido.imagenesProductos); // Para depuración
 
       const productosParsed = productosStrArray.map((prodStr, index) => {
         const regex = /^(\d+)x\s+(.+?)\s+\((.+?)\)\s+-\s+([\d.]+)\s+c\/u,\s+Subtotal:\s+([\d.]+),\s+Estado Producto:\s*(.+?)?,\s+Observaciones:\s+(.+)$/;
@@ -1105,6 +1106,8 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
 
 
 
+
+
 routerPedidos.get("/rastrear/:idRastreo", csrfProtection, async (req, res) => {
   try {
     const { idRastreo } = req.params;
@@ -1262,6 +1265,281 @@ routerPedidos.get("/historial/:idPedido", csrfProtection, async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
+
+// Crear sesión de checkout
+// Crear sesión de checkout
+routerPedidos.post('/pagos/crear-checkout-session', async (req, res) => {
+  console.log('Body recibido:', req.body);
+  if (!req.body) {
+    return res.status(400).json({ error: 'No se recibieron datos en la solicitud' });
+  }
+  const { amount, currency, successUrl, cancelUrl, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems } = req.body;
+
+  try {
+    // Generar un ID de pedido temporal (puede ser un UUID o un número único)
+    const tempPedidoId = `TEMP_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    // Guardar los detalles de cartItems en tblPedidosTemporales
+    await pool.query(
+      'INSERT INTO tblPedidosTemporales (tempPedidoId, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems, createdAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+      [tempPedidoId, idUsuario, idDireccion, fechaInicio, fechaEntrega, JSON.stringify(cartItems)]
+    );
+
+    // Obtener una cuenta receptora activa
+    const cuenta = await pool.query('SELECT stripe_account_id FROM tblCuentasReceptoras WHERE activa = 1 LIMIT 1');
+    if (!cuenta.length) {
+      return res.status(400).json({ error: 'No hay cuentas receptoras activas' });
+    }
+    const stripeAccount = cuenta[0].stripe_account_id;
+
+    // Crear sesión de checkout con metadata reducido
+    const session = await stripe.checkout.sessions.create(
+      {
+        payment_method_types: ['card'],
+        line_items: [{
+          price_data: {
+            currency: currency,
+            product_data: {
+              name: 'Renta Alquiladora Romero',
+            },
+            unit_amount: amount,
+          },
+          quantity: 1,
+        }],
+        mode: 'payment',
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: {
+          tempPedidoId, 
+          idUsuario,
+          idDireccion,
+          fechaInicio,
+          fechaEntrega,
+        },
+      },
+      { stripeAccount }
+    );
+
+    console.log("Datos de la sesion cuenta o tarjeta ", session)
+
+    res.json({ sessionId: session.id });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al crear la sesión de checkout' });
+  }
+});
+
+
+
+// Verificar estado del pago y procesar pedido
+// Verificar estado del pago y procesar pedido
+routerPedidos.get('/pagos/verificar/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status === 'paid') {
+      const { tempPedidoId, idUsuario, idDireccion, fechaInicio, fechaEntrega } = session.metadata;
+
+      // Recuperar los detalles de cartItems desde tblPedidosTemporales
+     const [rows] = await pool.query(
+  'SELECT cartItems FROM tblPedidosTemporales WHERE tempPedidoId = ?',
+  [tempPedidoId]
+);
+if (rows.length === 0) {
+  return res.status(400).json({ success: false, message: 'Pedido temporal no encontrado' });
+}
+const cartItemsParsed = JSON.parse(rows[0].cartItems);
+
+
+      // Crear registro en tblpagos
+      const pago = await pool.query(
+        'INSERT INTO tblpagos (idPedido, formaPago, metodoPago, monto, estadoPago, detallesPago, fechaPago) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+        [null, 'Tarjeta', 'Stripe', session.amount_total / 100, 'confirmado', JSON.stringify(session), null]
+      );
+      const idPago = pago.insertId;
+
+      // Crear pedido en tblpedidos
+      const pedido = await pool.query(
+        'INSERT INTO tblpedidos (idUsuarios, idNoClientes, idRastreo, idDireccion, fechaInicio, fechaEntrega, horaAlquiler, detallesPago, totalPagar, estadoActual, fechaRegistro, tipoPedido) VALUES (?, NULL, NULL, ?, ?, ?, NOW(), ?, ?, ?, NOW(), ?)',
+        [idUsuario, idDireccion, fechaInicio, fechaEntrega, JSON.stringify(session), session.amount_total / 100, 'confirmado', 'Online']
+      );
+      const idPedido = pedido.insertId;
+
+      // Actualizar tblpagos con idPedido
+      await pool.query('UPDATE tblpagos SET idPedido = ? WHERE idPago = ?', [idPedido, idPago]);
+
+      // Crear detalles en tblpedidodetalles
+      const detalles = cartItemsParsed.map(item => [
+        idPedido,
+        item.idProductoColores,
+        item.cantidad,
+        item.precioPorDia,
+        Math.ceil((new Date(fechaEntrega) - new Date(fechaInicio)) / (1000 * 60 * 60 * 24)),
+        item.precioPorDia * item.cantidad,
+        'disponible',
+        null,
+      ]);
+      await pool.query(
+        'INSERT INTO tblpedidodetalles (idPedido, idProductoColores, cantidad, precioUnitario, diasAlquiler, subtotal, estadoProducto, observaciones) VALUES ?',
+        [detalles]
+      );
+
+      // Actualizar inventario
+      for (const item of cartItemsParsed) {
+        await pool.query(
+          'UPDATE tblProductoColores SET cantidadDisponible = cantidadDisponible - ? WHERE idProductoColores = ?',
+          [item.cantidad, item.idProductoColores]
+        );
+      }
+
+      // Opcional: Eliminar el pedido temporal después de procesarlo
+      await pool.query('DELETE FROM tblPedidosTemporales WHERE tempPedidoId = ?', [tempPedidoId]);
+
+      res.json({ success: true, idPago, idPedido });
+    } else {
+      res.json({ success: false, message: 'Pago no completado' });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Error al verificar el pago' });
+  }
+});
+
+
+
+
+
+
+//MODLEO A PREDEECIR PEDIDO A CENCELAR
+async function obtenerDatosParaPrediccion(idPedido) {
+    try {
+        // 1. Obtener los detalles principales del pedido y del cliente
+        const queryPedido = `
+            SELECT
+                p.totalPagar AS total_a_pagar,
+                p.idUsuarios,
+                p.idNoClientes
+            FROM tblpedidos p
+            WHERE p.idPedido = ?;
+        `;
+        const [pedidoRows] = await pool.query(queryPedido, [idPedido]);
+        if (pedidoRows.length === 0) {
+            console.error(`No se encontró el pedido con ID: ${idPedido}`);
+            return null;
+        }
+        const pedido = pedidoRows[0];
+        const idCliente = pedido.idUsuarios || pedido.idNoClientes;
+
+        // 2. Obtener métricas agregadas de los productos del pedido
+        const queryMetricasProductos = `
+            SELECT
+                SUM(d.cantidad) AS total_cantidad_productos,
+                COUNT(DISTINCT p.idProducto) AS total_productos_distintos,
+                MIN(i.stock) AS stock_minimo_del_pedido,
+                COUNT(DISTINCT cat.idCategoria) AS total_categorias_distintas
+            FROM tblpedidodetalles d
+            JOIN tblproductoscolores pc ON d.idProductoColores = pc.idProductoColores
+            JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+            JOIN tblproductos p ON pc.idProducto = p.idProducto
+            JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+            JOIN tblcategoria cat ON sc.idCategoria = cat.idCategoria
+            WHERE d.idPedido = ?
+            GROUP BY d.idPedido;
+        `;
+        const [metricasRows] = await pool.query(queryMetricasProductos, [idPedido]);
+        const metricasProductos = metricasRows[0] || {}; // Objeto vacío si no hay productos
+
+        // 3. Obtener la tasa de cancelación histórica del cliente
+        let tasaCancelaciones = 0;
+        if (idCliente) {
+            const queryTasaCancelacion = `
+                SELECT COALESCE(AVG(CASE WHEN estadoActual = 'Cancelado' THEN 1.0 ELSE 0.0 END), 0) AS tasa
+                FROM tblpedidos
+                WHERE (idUsuarios = ? OR idNoClientes = ?);
+            `;
+            const [tasaRows] = await pool.query(queryTasaCancelacion, [idCliente, idCliente]);
+            tasaCancelaciones = tasaRows[0].tasa;
+        }
+
+        // 4. Construir el objeto final para la API de Python
+        const datosParaAPI = {
+            num__total_a_pagar: parseFloat(pedido.total_a_pagar) || 0,
+            num__total_cantidad_productos: parseInt(metricasProductos.total_cantidad_productos) || 0,
+            num__total_productos_distintos: parseInt(metricasProductos.total_productos_distintos) || 0,
+            num__stock_minimo_del_pedido: metricasProductos.stock_minimo_del_pedido || 0,
+            num__total_categorias_distintas: parseInt(metricasProductos.total_categorias_distintas) || 0,
+            num__tasa_cancelaciones_historicas_cliente: parseFloat(tasaCancelaciones)
+        };
+
+        return datosParaAPI;
+
+    } catch (error) {
+        console.error(`❌ Error al obtener datos para la predicción del pedido ${idPedido}:`, error);
+        return null;
+    }
+}
+
+// --- NUEVO ENDPOINT PARA PREDECIR CANCELACIONES DE PEDIDOS ACTIVOS ---
+routerPedidos.get("/predecir-pedidos-activos", csrfProtection, async (req, res) => {
+    try {
+        // 1. Obtener todos los pedidos que no están finalizados ni cancelados
+        const [pedidosActivos] = await pool.query(`
+            SELECT p.idPedido, p.idRastreo, p.totalPagar, p.estadoActual,
+                   COALESCE(CONCAT(u.nombre, ' ', u.apellidoP), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente
+            FROM tblpedidos p
+            LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
+            LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+            LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
+            WHERE LOWER(p.estadoActual) NOT IN ('finalizado', 'cancelado')
+            ORDER BY p.fechaRegistro DESC;
+        `);
+
+        if (pedidosActivos.length === 0) {
+            return res.json({ success: true, data: [], message: "No hay pedidos activos para predecir." });
+        }
+
+        // 2. Preparar todas las llamadas a la API de predicción en paralelo
+        const promesasDePrediccion = pedidosActivos.map(async (pedido) => {
+            const datosParaPrediccion = await obtenerDatosParaPrediccion(pedido.idPedido);
+            let prediccion = null;
+
+            if (datosParaPrediccion) {
+                try {
+                    const response = await axios.post('https://predicion-de-peididos-calcelados.onrender.com/predecir', datosParaPrediccion);
+                    prediccion = response.data;
+                } catch (apiError) {
+                    console.error(`⚠️ Error al contactar la API para el pedido ${pedido.idPedido}:`, apiError.message);
+                    prediccion = { error: "No se pudo obtener la predicción." };
+                }
+            } else {
+                prediccion = { error: "No se pudieron recopilar los datos para la predicción." };
+            }
+            
+            // Combinar los datos del pedido original con su predicción
+            return {
+                ...pedido, // idPedido, idRastreo, totalPagar, etc.
+                prediccion // { prediccion_texto, probabilidad_de_cancelacion, etc. }
+            };
+        });
+
+        // 3. Esperar a que todas las predicciones se completen
+        const pedidosConPrediccion = await Promise.all(promesasDePrediccion);
+
+        res.json({ success: true, data: pedidosConPrediccion });
+
+    } catch (error) {
+        console.error("❌ Error en el endpoint /predecir-pedidos-activos:", error);
+        res.status(500).json({ success: false, error: "Ocurrió un error interno al procesar las predicciones." });
+    }
+});
+
 
 
 

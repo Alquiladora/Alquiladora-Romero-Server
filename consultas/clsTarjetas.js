@@ -122,7 +122,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
           await setUniqueActiveAccount(localAccount.id);
         }
       }
-    } catch (dbError) {
+    } catch (polError) {
       console.error(`[DB-WEBHOOK] Error: ${dbError.message}`);
       return res.status(500).json({ error: 'Error de base de datos en el webhook.' });
     }
@@ -268,6 +268,14 @@ router.delete('/cuentas/:id', async (req, res) => {
     res.status(500).json({ error: 'Error eliminando cuenta' });
   }
 });
+
+
+
+//==================================================PAGOS---------------------
+
+
+
+
 
 
 module.exports = router;
