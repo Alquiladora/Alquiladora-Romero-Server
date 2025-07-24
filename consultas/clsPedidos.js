@@ -1287,6 +1287,85 @@ routerPedidos.get("/historial/:idPedido", csrfProtection, async (req, res) => {
 
 
 
+routerPedidos.get("/productos/selecion", csrfProtection, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = 10; // Fixed to 10 products per page
+    const offset = (page - 1) * limit;
+
+    // Get total count of products for pagination
+    const [[{ totalItems }]] = await pool.query(
+      `SELECT COUNT(*) as totalItems FROM tblproductos`
+    );
+    const totalPages = Math.ceil(totalItems / limit);
+
+    // Query to fetch products with their first associated photo
+    const query = `
+      SELECT 
+        p.idProducto,
+        p.nombre,
+        p.detalles,
+        p.idSubcategoria,
+        p.material,
+        p.fechaCreacion,
+        p.fechaActualizacion,
+        p.idUsuarios,
+        COALESCE(
+          (SELECT fp.urlFoto 
+           FROM tblfotosproductos fp 
+           WHERE fp.idProducto = p.idProducto 
+           ORDER BY fp.idFoto ASC LIMIT 1),
+          'Sin imagen'
+        ) AS urlFoto
+      FROM tblproductos p
+      ORDER BY p.fechaCreacion DESC
+      LIMIT ? OFFSET ?;
+    `;
+
+    const [results] = await pool.query(query, [limit, offset]);
+
+    // Map results to desired format
+    const response = results.map((producto) => ({
+      idProducto: producto.idProducto,
+      nombre: producto.nombre,
+      detalles: producto.detalles || "Sin descripción",
+      idSubcategoria: producto.idSubcategoria,
+      material: producto.material || null,
+      fechaCreacion: moment(producto.fechaCreacion)
+        .tz("America/Mexico_City")
+        .format("YYYY-MM-DD HH:mm:ss"),
+      fechaActualizacion: moment(producto.fechaActualizacion)
+        .tz("America/Mexico_City")
+        .format("YYYY-MM-DD HH:mm:ss"),
+      idUsuarios: producto.idUsuarios,
+      urlFoto: producto.urlFoto,
+    }));
+
+    res.status(200).json({
+      success: true,
+      message: "Productos recuperados exitosamente",
+      data: response,
+      pagination: {
+        currentPage: page,
+        totalPages: totalPages,
+        totalItems: totalItems,
+        itemsPerPage: limit,
+      },
+    });
+  } catch (error) {
+    console.error("Error al obtener productos:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      success: false,
+      message: "Error interno al obtener los productos",
+      error: error.message,
+    });
+  }
+});
+
+
 
 
 
