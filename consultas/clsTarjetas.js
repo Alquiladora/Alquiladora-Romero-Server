@@ -4,6 +4,7 @@ const { pool } = require('../connectBd');
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const paymentWebhookSecret = process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
 
 const jsonParser = express.json();
 
@@ -129,6 +130,8 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
   res.json({ received: true });
 });
+
+
 
 
 
@@ -272,8 +275,126 @@ router.delete('/cuentas/:id', async (req, res) => {
 
 
 //==================================================PAGOS---------------------
+const generateNumericTrackingId = () => {
+  const timestamp = Date.now().toString();
+  const randomDigits = Math.floor(Math.random() * 100).toString().padStart(2, "0");
+  return "ROMERO-" + timestamp + randomDigits; 
+};
+
+// NUEVO WEBHOOK PARA PAGOS COMPLETADOS
+
+router.post('/notificar-pago', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, paymentWebhookSecret);
+  } catch (err) {
+    console.log(`Webhook de Pagos - Error de firma: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const { tempPedidoId, idUsuario } = session.metadata;
+
+   
+    const connection = await pool.getConnection();
+
+    try {
+      console.log(`Procesando Pedido Temporal: ${tempPedidoId} para Usuario: ${idUsuario}`);
+
+  
+      const [tempOrders] = await connection.query(
+        "SELECT * FROM tblPedidosTemporales WHERE tempPedidoId = ?",
+        [tempPedidoId]
+      );
+
+      if (tempOrders.length === 0) {
+        
+        console.warn(`Webhook recibido para un pedido temporal no encontrado o ya procesado: ${tempPedidoId}`);
+        return res.status(200).json({ received: true, message: 'Pedido no encontrado o ya procesado.' });
+      }
+      const tempOrder = tempOrders[0];
+      const cartItems = JSON.parse(tempOrder.cartItems);
+
+     
+      for (const item of cartItems) {
+        const [inventario] = await connection.query(
+          "SELECT stock FROM tblinventario WHERE idProductoColor = ?",
+          [item.idProductoColor]
+        );
+        if (inventario.length === 0 || inventario[0].stock < item.cantidad) {
+         
+          console.error(`Error de stock para producto ${item.idProductoColor}. Stock disponible: ${inventario[0]?.stock || 0}, solicitado: ${item.cantidad}`);
+         
+          return res.status(500).json({ error: 'Stock insuficiente.' });
+        }
+      }
+      console.log('Stock verificado exitosamente.');
+
+    
+      await connection.beginTransaction();
+      console.log('Transacción iniciada.');
+
+       const idRastreo = generateNumericTrackingId();
+      const totalPagar = session.amount_total / 100;
+       const [pedidoResult] = await connection.query(
+        `INSERT INTO tblpedidos (idUsuarios, idDireccion, fechaInicio, fechaEntrega, horaAlquiler, totalPagar, estadoActual, tipoPedido, idRastreo) VALUES (?, ?, ?, ?, CURTIME(), ?, ?, 'Online', ?)`,
+        [idUsuario, tempOrder.idDireccion, tempOrder.fechaInicio, tempOrder.fechaEntrega, totalPagar, 'Confirmado', idRastreo]
+      );
+      const nuevoPedidoId = pedidoResult.insertId;
+      console.log(`Pedido permanente creado con ID: ${nuevoPedidoId}`);
+      
+    
+      for (const item of cartItems) {
+        const diasAlquiler = (new Date(tempOrder.fechaEntrega) - new Date(tempOrder.fechaInicio)) / (1000 * 60 * 60 * 24);
+        const subtotal = item.cantidad * item.precioPorDia * diasAlquiler;
 
 
+        await connection.query(
+          `INSERT INTO tblpedidodetalles (idPedido, idProductoColores, cantidad, precioUnitario, diasAlquiler, subtotal, estadoProducto) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [nuevoPedidoId, item.idProductoColor, item.cantidad, item.precioPorDia, diasAlquiler, subtotal, 'Disponible']
+        );
+
+     
+        await connection.query(
+          "UPDATE tblinventario SET stock = stock - ? WHERE idProductoColor = ?",
+          [item.cantidad, item.idProductoColor]
+        );
+      }
+      console.log('Detalles de pedido creados y stock actualizado.');
+
+ 
+      await connection.query(
+        `INSERT INTO tblpagos (idPedido, formaPago, metodoPago, monto, estadoPago, detallesPago) VALUES (?, ?, ?, ?, ?, ?)`,
+        [nuevoPedidoId, 'Tarjeta', session.payment_method_types[0], totalPagar, 'Completado', session.payment_intent]
+      );
+      console.log('Registro de pago creado.');
+
+ 
+      await connection.query("DELETE FROM tblcarrito WHERE idUsuario = ?", [idUsuario]);
+      await connection.query("DELETE FROM tblPedidosTemporales WHERE tempPedidoId = ?", [tempPedidoId]);
+      console.log('Limpieza de carrito y pedido temporal completada.');
+
+  
+      await connection.commit();
+      console.log(`✅ Transacción completada exitosamente para Pedido ID: ${nuevoPedidoId}.`);
+
+    } catch (dbError) {
+ 
+      await connection.rollback();
+      console.error(`[DB-WEBHOOK-PAGO] Error en la transacción, se hizo ROLLBACK. Error: ${dbError.message}`);
+    
+      return res.status(500).json({ error: 'Error procesando el pedido.' });
+    } finally {
+     
+      connection.release();
+    }
+  }
+
+
+  res.json({ received: true });
+});
 
 
 

@@ -1004,9 +1004,7 @@ routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res)
 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
   try {
-  
     const { idUsuarios } = req.params;
-
 
     if (!idUsuarios || isNaN(idUsuarios)) {
       return res.status(400).json({
@@ -1015,95 +1013,115 @@ routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, re
       });
     }
 
-    await pool.query("SET SESSION group_concat_max_len = 1000000;");
-
-  
+    // Consulta SQL corregida y optimizada
     const query = `
-      SELECT 
-        p.idPedido,
-        p.idRastreo,
-        COALESCE(CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente,
-        COALESCE(u.telefono, d.telefono) AS telefono,
-        CONCAT(d.direccion, ', ', d.localidad, ', ', d.municipio, ', ', d.estado, ', ', d.pais, ' C.P. ', d.codigoPostal) AS direccionCompleta,
-        p.fechaInicio,
-        p.fechaEntrega,
-        TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
-        p.horaAlquiler,
-        p.formaPago,
-        p.detallesPago,
-        p.totalPagar,
-        p.estado,
-        p.fechaRegistro,
-        CASE 
-          WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
-          WHEN nc.idNoClientes IS NOT NULL THEN 'Cliente convertido'
-          ELSE 'No cliente'
-        END AS tipoCliente,
-        JSON_ARRAYAGG(
-          JSON_OBJECT(
-            'cantidad', pd.cantidad,
-            'nombre', prod.nombre,
-            'color', c.color,
-            'precioUnitario', pd.precioUnitario,
-            'subtotal', pd.subtotal
-          )
-        ) AS productosAlquilados
-      FROM tblpedidos p
-      LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
-      LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
-      LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
-      LEFT JOIN tblpedidodetalles pd ON p.idPedido = pd.idPedido
-      LEFT JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
-      LEFT JOIN tblcolores c ON pc.idColor = c.idColores
-      LEFT JOIN tblproductos prod ON pc.idProducto = prod.idProducto
-      WHERE p.idUsuarios = ?
-      GROUP BY p.idPedido
-      ORDER BY p.fechaRegistro DESC;
+      SELECT
+          p.idPedido,
+          p.idRastreo,
+          p.totalPagar,
+          p.estadoActual,
+          p.fechaRegistro,
+          p.fechaInicio,
+          p.fechaEntrega,
+          p.horaAlquiler,
+          p.detallesPago,
+          TIMESTAMPDIFF(DAY, p.fechaInicio, p.fechaEntrega) AS diasAlquiler,
+          
+          COALESCE(
+              CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM), 
+              CONCAT(nc.nombre, ' ', nc.apellidoCompleto)
+          ) AS nombreCliente,
+          
+          COALESCE(u.correo, nc.correo) AS contactoCorreo,
+          COALESCE(u.telefono, nc.telefono) AS contactoTelefono,
+          
+          CONCAT(
+              d.direccion, ', ', 
+              d.localidad, ', ', 
+              d.municipio, ', ', 
+              d.estado, ', C.P. ', 
+              d.codigoPostal
+          ) AS direccionCompleta,
+
+          (
+              SELECT JSON_ARRAYAGG(
+                  JSON_OBJECT(
+                      'cantidad', pd.cantidad,
+                      'nombre', prod.nombre,
+                      'color', c.color,
+                      'precioUnitario', pd.precioUnitario,
+                      'subtotal', pd.subtotal
+                  )
+              )
+              FROM tblpedidodetalles pd
+              JOIN tblproductoscolores pc ON pd.idProductoColores = pc.idProductoColores
+              JOIN tblproductos prod ON pc.idProducto = prod.idProducto
+              JOIN tblcolores c ON pc.idColor = c.idColores
+              WHERE pd.idPedido = p.idPedido
+          ) AS productosAlquilados
+
+      FROM 
+          tblpedidos p
+      JOIN 
+          tbldireccioncliente d ON p.idDireccion = d.idDireccion
+      LEFT JOIN 
+          tblusuarios u ON p.idUsuarios = u.idUsuarios
+      LEFT JOIN 
+          tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      WHERE 
+          p.idUsuarios = ?
+      ORDER BY 
+          p.fechaRegistro DESC;
     `;
 
-    const [results] = await pool.query(query);
+    const [results] = await pool.query(query, [idUsuarios]);
 
-    const response = results.map((pedido) => ({
-      idPedido: pedido.idPedido,
-      idRastreo: pedido.idRastreo,
-      cliente: {
-        nombre: pedido.nombreCliente,
-        telefono: pedido.telefono,
-        direccion: pedido.direccionCompleta,
-        tipoCliente: pedido.tipoCliente,
-      },
-      fechas: {
-        inicio: pedido.fechaInicio,
-        entrega: pedido.fechaEntrega,
-        diasAlquiler: pedido.diasAlquiler,
-        horaAlquiler: pedido.horaAlquiler,
-        registro: pedido.fechaRegistro,
-      },
-      pago: {
-        detalles: pedido.detallesPago,
-        total: pedido.totalPagar,
-        pagosRealizados: pedido.pagos ? JSON.parse(pedido.pagos) : [],
-      },
-      estado: pedido.estado,
-      productos: pedido.productosAlquilados ? JSON.parse(pedido.productosAlquilados) : [],
-    }));
+    const response = results.map((pedido) => {
+      // El JSON ya viene agregado por la base de datos, solo necesitamos parsearlo.
+      const productosParsed = pedido.productosAlquilados ? JSON.parse(pedido.productosAlquilados) : [];
+
+      return {
+        idPedido: pedido.idPedido,
+        idRastreo: pedido.idRastreo,
+        estado: pedido.estadoActual,
+        fechas: {
+          registro: pedido.fechaRegistro,
+          inicioAlquiler: pedido.fechaInicio,
+          entregaAlquiler: pedido.fechaEntrega,
+          diasAlquiler: pedido.diasAlquiler,
+          horaAlquiler: pedido.horaAlquiler,
+        },
+        pago: {
+          total: parseFloat(pedido.totalPagar) || 0,
+          detalles: pedido.detallesPago,
+        },
+        cliente: {
+          nombre: pedido.nombreCliente,
+          correo: pedido.contactoCorreo,
+          telefono: pedido.contactoTelefono,
+          direccion: pedido.direccionCompleta,
+        },
+        productos: productosParsed,
+      };
+    });
 
     res.status(200).json({
       success: true,
       data: response,
-      total: response.length,
     });
+
   } catch (error) {
-    console.error("Error al obtener los pedidos generales:", error);
+    console.error("Error al obtener el historial de pedidos del cliente:", {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
+      message: "Error interno del servidor al obtener el historial de pedidos.",
       error: error.message,
     });
   }
 });
-
-
 
 
 
@@ -1272,69 +1290,78 @@ routerPedidos.get("/historial/:idPedido", csrfProtection, async (req, res) => {
 
 
 
+
 // Crear sesión de checkout
-// Crear sesión de checkout
+
 routerPedidos.post('/pagos/crear-checkout-session', async (req, res) => {
-  console.log('Body recibido:', req.body);
-  if (!req.body) {
-    return res.status(400).json({ error: 'No se recibieron datos en la solicitud' });
-  }
-  const { amount, currency, successUrl, cancelUrl, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems } = req.body;
-
   try {
-    // Generar un ID de pedido temporal (puede ser un UUID o un número único)
+    const { amount, currency, successUrl, cancelUrl, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems } = req.body;
+     for (const item of cartItems) {
+      const [inventario] = await pool.query(
+        "SELECT stock FROM tblinventario WHERE idProductoColor = ?",
+        [item.idProductoColor]
+      );
+      if (inventario.length === 0 || inventario[0].stock < item.cantidad) {
+        const stockDisponible = inventario.length > 0 ? inventario[0].stock : 0;
+        console.error(`Stock insuficiente para ${item.nombre} (ID: ${item.idProductoColor}). Solicitado: ${item.cantidad}, Disponible: ${stockDisponible}`);
+        return res.status(400).json({
+          error: `Lo sentimos, no hay stock suficiente para "${item.nombre}". Cantidad disponible: ${stockDisponible}.`
+        });
+      }
+    }
     const tempPedidoId = `TEMP_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  
 
-    // Guardar los detalles de cartItems en tblPedidosTemporales
     await pool.query(
       'INSERT INTO tblPedidosTemporales (tempPedidoId, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems, createdAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
       [tempPedidoId, idUsuario, idDireccion, fechaInicio, fechaEntrega, JSON.stringify(cartItems)]
     );
 
-    // Obtener una cuenta receptora activa
     const cuenta = await pool.query('SELECT stripe_account_id FROM tblCuentasReceptoras WHERE activa = 1 LIMIT 1');
-    if (!cuenta.length) {
-      return res.status(400).json({ error: 'No hay cuentas receptoras activas' });
-    }
-    const stripeAccount = cuenta[0].stripe_account_id;
 
-    // Crear sesión de checkout con metadata reducido
-    const session = await stripe.checkout.sessions.create(
-      {
-        payment_method_types: ['card'],
-        line_items: [{
-          price_data: {
-            currency: currency,
-            product_data: {
-              name: 'Renta Alquiladora Romero',
-            },
-            unit_amount: amount,
+    if (!cuenta || !cuenta[0] || !cuenta[0][0]) {
+      return res.status(400).json({ error: 'No se encontró una cuenta receptora activa.' });
+    }
+    
+    const stripeAccount = cuenta[0][0].stripe_account_id;
+
+    console.log('>>> Se usará esta cuenta para la transferencia:', stripeAccount);
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: currency,
+          product_data: {
+            name: 'Renta Alquiladora Romero',
           },
-          quantity: 1,
-        }],
-        mode: 'payment',
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        metadata: {
-          tempPedidoId, 
-          idUsuario,
-          idDireccion,
-          fechaInicio,
-          fechaEntrega,
+          unit_amount: amount,
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        tempPedidoId,
+        idUsuario,
+        idDireccion,
+        fechaInicio,
+        fechaEntrega,
+      },
+      payment_intent_data: {
+        transfer_data: {
+          destination: stripeAccount,
         },
       },
-      { stripeAccount }
-    );
-
-    console.log("Datos de la sesion cuenta o tarjeta ", session)
+    });
 
     res.json({ sessionId: session.id });
   } catch (error) {
-    console.error(error);
+    console.error("Error al crear la sesión de checkout:", error);
     res.status(500).json({ error: 'Error al crear la sesión de checkout' });
   }
 });
-
 
 
 // Verificar estado del pago y procesar pedido
@@ -1417,10 +1444,11 @@ const cartItemsParsed = JSON.parse(rows[0].cartItems);
 
 
 
-//MODLEO A PREDEECIR PEDIDO A CENCELAR
+
+// MODEL TO PREDICT ORDER CANCELLATION
 async function obtenerDatosParaPrediccion(idPedido) {
     try {
-        // 1. Obtener los detalles principales del pedido y del cliente
+        // 1. Obtain the main details of the order and client
         const queryPedido = `
             SELECT
                 p.totalPagar AS total_a_pagar,
@@ -1437,7 +1465,7 @@ async function obtenerDatosParaPrediccion(idPedido) {
         const pedido = pedidoRows[0];
         const idCliente = pedido.idUsuarios || pedido.idNoClientes;
 
-        // 2. Obtener métricas agregadas de los productos del pedido
+        // 2. Obtain aggregated metrics of the order's products
         const queryMetricasProductos = `
             SELECT
                 SUM(d.cantidad) AS total_cantidad_productos,
@@ -1454,30 +1482,33 @@ async function obtenerDatosParaPrediccion(idPedido) {
             GROUP BY d.idPedido;
         `;
         const [metricasRows] = await pool.query(queryMetricasProductos, [idPedido]);
-        const metricasProductos = metricasRows[0] || {}; // Objeto vacío si no hay productos
+        const metricasProductos = metricasRows[0] || {};
 
-        // 3. Obtener la tasa de cancelación histórica del cliente
+        // 3. Calculate historical cancellation rate for the client
         let tasaCancelaciones = 0;
         if (idCliente) {
             const queryTasaCancelacion = `
                 SELECT COALESCE(AVG(CASE WHEN estadoActual = 'Cancelado' THEN 1.0 ELSE 0.0 END), 0) AS tasa
                 FROM tblpedidos
-                WHERE (idUsuarios = ? OR idNoClientes = ?);
+                WHERE 
+                    (idUsuarios = ? OR idNoClientes = ?) 
+                    AND fechaRegistro < (SELECT fechaRegistro FROM tblpedidos WHERE idPedido = ?);
             `;
-            const [tasaRows] = await pool.query(queryTasaCancelacion, [idCliente, idCliente]);
+            const [tasaRows] = await pool.query(queryTasaCancelacion, [idCliente, idCliente, idPedido]);
             tasaCancelaciones = tasaRows[0].tasa;
         }
 
-        // 4. Construir el objeto final para la API de Python
+        // 4. Build the final object for the Python API
         const datosParaAPI = {
             num__total_a_pagar: parseFloat(pedido.total_a_pagar) || 0,
             num__total_cantidad_productos: parseInt(metricasProductos.total_cantidad_productos) || 0,
             num__total_productos_distintos: parseInt(metricasProductos.total_productos_distintos) || 0,
-            num__stock_minimo_del_pedido: metricasProductos.stock_minimo_del_pedido || 0,
+            num__stock_minimo_del_pedido: parseInt(metricasProductos.stock_minimo_del_pedido) || 0,
             num__total_categorias_distintas: parseInt(metricasProductos.total_categorias_distintas) || 0,
-            num__tasa_cancelaciones_historicas_cliente: parseFloat(tasaCancelaciones)
+            num__tasa_cancelaciones_historicas_cliente: parseFloat(tasaCancelaciones) || 0
         };
 
+        console.log("Datos preparados para la API:", datosParaAPI);
         return datosParaAPI;
 
     } catch (error) {
@@ -1486,59 +1517,221 @@ async function obtenerDatosParaPrediccion(idPedido) {
     }
 }
 
-// --- NUEVO ENDPOINT PARA PREDECIR CANCELACIONES DE PEDIDOS ACTIVOS ---
-routerPedidos.get("/predecir-pedidos-activos", csrfProtection, async (req, res) => {
+// NEW ENDPOINT TO PREDICT CANCELLATION FOR A SINGLE ORDER
+routerPedidos.get("/predecir-pedido/:idPedido", csrfProtection, async (req, res) => {
     try {
-        // 1. Obtener todos los pedidos que no están finalizados ni cancelados
-        const [pedidosActivos] = await pool.query(`
+        const { idPedido } = req.params;
+
+        // 1. Fetch details of the specified order
+        const [pedidoRows] = await pool.query(`
             SELECT p.idPedido, p.idRastreo, p.totalPagar, p.estadoActual,
                    COALESCE(CONCAT(u.nombre, ' ', u.apellidoP), CONCAT(d.nombre, ' ', d.apellido)) AS nombreCliente
             FROM tblpedidos p
             LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
             LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
             LEFT JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
-            WHERE LOWER(p.estadoActual) NOT IN ('finalizado', 'cancelado')
-            ORDER BY p.fechaRegistro DESC;
-        `);
+            WHERE p.idPedido = ? AND LOWER(p.estadoActual) NOT IN ('finalizado', 'cancelado');
+        `, [idPedido]);
 
-        if (pedidosActivos.length === 0) {
-            return res.json({ success: true, data: [], message: "No hay pedidos activos para predecir." });
+        console.log("Pedido obtenido para predecir:", pedidoRows);
+
+        if (pedidoRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: `No se encontró un pedido activo con ID: ${idPedido}.`
+            });
         }
 
-        // 2. Preparar todas las llamadas a la API de predicción en paralelo
-        const promesasDePrediccion = pedidosActivos.map(async (pedido) => {
-            const datosParaPrediccion = await obtenerDatosParaPrediccion(pedido.idPedido);
-            let prediccion = null;
+        const pedido = pedidoRows[0];
 
-            if (datosParaPrediccion) {
-                try {
-                    const response = await axios.post('https://predicion-de-peididos-calcelados.onrender.com/predecir', datosParaPrediccion);
-                    prediccion = response.data;
-                } catch (apiError) {
-                    console.error(`⚠️ Error al contactar la API para el pedido ${pedido.idPedido}:`, apiError.message);
-                    prediccion = { error: "No se pudo obtener la predicción." };
-                }
-            } else {
-                prediccion = { error: "No se pudieron recopilar los datos para la predicción." };
+        // 2. Fetch prediction data and make API call
+        const datosParaPrediccion = await obtenerDatosParaPrediccion(pedido.idPedido);
+
+   console.log("Pedido obtenido para predecir:", datosParaPrediccion);
+        let prediccion = null;
+
+        if (datosParaPrediccion) {
+            try {
+                const response = await axios.post('https://predicion-de-peididos-calcelados.onrender.com/predecir', datosParaPrediccion, {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                prediccion = response.data;
+                console.log("Respuesta de la API de predicción:", prediccion);
+            } catch (apiError) {
+                console.error(`⚠️ Error al contactar la API para el pedido ${pedido.idPedido}:`, apiError.message);
+                prediccion = { error: "No se pudo obtener la predicción." };
             }
-            
-            // Combinar los datos del pedido original con su predicción
-            return {
-                ...pedido, // idPedido, idRastreo, totalPagar, etc.
-                prediccion // { prediccion_texto, probabilidad_de_cancelacion, etc. }
-            };
-        });
+        } else {
+            prediccion = { error: "No se pudieron recopilar los datos para la predicción." };
+        }
 
-        // 3. Esperar a que todas las predicciones se completen
-        const pedidosConPrediccion = await Promise.all(promesasDePrediccion);
+        // 3. Combine order data with prediction
+        const pedidoConPrediccion = {
+            idPedido: pedido.idPedido,
+            idRastreo: pedido.idRastreo,
+            totalPagar: pedido.totalPagar,
+            estadoActual: pedido.estadoActual,
+            nombreCliente: pedido.nombreCliente,
+            prediccion
+        };
 
-        res.json({ success: true, data: pedidosConPrediccion });
+        console.log("Resultado final con predicción:", pedidoConPrediccion);
+        res.json({ success: true, data: pedidoConPrediccion });
 
     } catch (error) {
-        console.error("❌ Error en el endpoint /predecir-pedidos-activos:", error);
-        res.status(500).json({ success: false, error: "Ocurrió un error interno al procesar las predicciones." });
+        console.error(`❌ Error en el endpoint /predecir-pedido/${req.params.idPedido}:`, error);
+        res.status(500).json({ success: false, error: "Ocurrió un error interno al procesar la predicción." });
     }
 });
+
+
+
+routerPedidos.get("/pedidos/detalles/pagos", csrfProtection, async (req, res) => {
+  try {
+   
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = 15; 
+    const offset = (page - 1) * limit; 
+
+ 
+    const [[{ totalItems }]] = await pool.query(`SELECT COUNT(*) as totalItems FROM tblpedidos`);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    await pool.query("SET SESSION group_concat_max_len = 1000000;");
+
+   
+    const query = `
+      SELECT 
+        p.idPedido,
+        p.idRastreo,
+        p.totalPagar,
+        p.tipoPedido,
+        p.estadoActual,
+        p.fechaRegistro,
+        p.fechaInicio,
+        p.fechaEntrega,
+        COALESCE(
+          CONCAT(u.nombre, ' ', u.apellidoP, ' ', COALESCE(u.apellidoM, '')),
+          CONCAT(nc.nombre, ' ', nc.apellidoCompleto),
+          'No especificado'
+        ) AS nombreCliente,
+       COALESCE(u.correo, nc.correo, u.telefono, nc.telefono, 'N/A') AS contacto,
+        CASE 
+          WHEN u.idUsuarios IS NOT NULL AND nc.idUsuario IS NOT NULL THEN 'Cliente convertido'
+          WHEN u.idUsuarios IS NOT NULL THEN 'Cliente registrado'
+          WHEN nc.idNoClientes IS NOT NULL THEN 'No cliente'
+          ELSE 'Desconocido'
+        END AS tipoCliente,
+        (
+          SELECT COUNT(*) 
+          FROM tblpagos pg 
+          WHERE pg.idPedido = p.idPedido
+        ) AS numeroPagos,
+        (
+          SELECT GROUP_CONCAT(
+            JSON_OBJECT(
+              'idPago', pg.idPago,
+              'formaPago', pg.formaPago,
+              'metodoPago', pg.metodoPago,
+              'monto', pg.monto,
+              'estadoPago', pg.estadoPago,
+              'fechaPago', DATE_FORMAT(pg.fechaPago, '%Y-%m-%d %H:%i:%s')
+            )
+            SEPARATOR ','
+          )
+          FROM tblpagos pg
+          WHERE pg.idPedido = p.idPedido
+        ) AS pagos,
+        (
+          SELECT COALESCE(SUM(CASE WHEN pg.estadoPago = 'completado' THEN pg.monto ELSE 0 END), 0)
+          FROM tblpagos pg
+          WHERE pg.idPedido = p.idPedido
+        ) AS totalPagado,
+        (
+          SELECT COALESCE(
+            SUM(
+              CASE 
+                WHEN pg.estadoPago = 'completado' AND pg.formaPago = 'Tarjeta' 
+                THEN pg.monto - (pg.monto * 0.029 + 0.30) 
+                WHEN pg.estadoPago = 'completado' THEN pg.monto 
+                ELSE 0 
+              END
+            ), 0)
+          FROM tblpagos pg
+          WHERE pg.idPedido = p.idPedido
+        ) AS totalRecibido
+      FROM tblpedidos p
+      LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+      LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios OR nc.idUsuario = u.idUsuarios
+      GROUP BY p.idPedido
+      ORDER BY p.fechaRegistro DESC
+      LIMIT ? 
+      OFFSET ?;
+    `;
+
+    // MODIFICADO: Pasamos los parámetros de paginación a la consulta.
+    const [results] = await pool.query(query, [limit, offset]);
+    
+    // El resto del mapeo de datos se queda igual...
+    const response = results.map((pedido) => {
+      // ... tu lógica de mapeo existente ...
+      const pagosParsed = pedido.pagos && pedido.pagos !== '[]' && pedido.pagos !== '' ? JSON.parse(`[${pedido.pagos}]`) : [];
+      const totalPagado = parseFloat(pedido.totalPagado) || 0;
+      const totalPagar = parseFloat(pedido.totalPagar) || 0;
+      const estadoPago = totalPagado >= totalPagar ? 'completado' : totalPagado > 0 ? 'parcial' : 'pendiente';
+      return {
+        idPedido: pedido.idPedido,
+        idRastreo: pedido.idRastreo || 'N/A',
+        cliente: { nombre: pedido.nombreCliente, contacto: pedido.contacto, tipoCliente: pedido.tipoCliente },
+        totalPagar: totalPagar.toFixed(2),
+        tipoPedido: pedido.tipoPedido,
+        recibido: ['Entregado', 'Finalizado'].includes(pedido.estadoActual),
+        estadoActual: pedido.estadoActual,
+        fechaRegistro: pedido.fechaRegistro,
+        fechaInicio: pedido.fechaInicio,
+        fechaEntrega: pedido.fechaEntrega,
+        pagos: {
+          numeroPagos: parseInt(pedido.numeroPagos) || 0,
+          listaPagos: pagosParsed.map((pago) => ({
+            idPago: pago.idPago,
+            formaPago: pago.formaPago || 'N/A',
+            metodoPago: pago.metodoPago || 'N/A',
+            monto: parseFloat(pago.monto) || 0,
+            estadoPago: pago.estadoPago || 'pendiente',
+            fechaPago: pago.fechaPago || null,
+          })),
+          totalPagado: totalPagado.toFixed(2),
+          totalRecibido: parseFloat(pedido.totalRecibido).toFixed(2),
+          estadoPago,
+        },
+      };
+    });
+    
+
+    res.status(200).json({
+      success: true,
+      message: "Pedidos recuperados exitosamente",
+      data: response,
+      pagination: {
+        currentPage: page,
+        totalPages: totalPages,
+        totalItems: totalItems
+      }
+    });
+
+  } catch (error) {
+    console.error("Error al obtener detalles de pedidos:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      success: false,
+      message: "Error interno al obtener los detalles de los pedidos",
+      error: error.message,
+    });
+  }
+});
+
 
 
 
