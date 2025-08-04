@@ -1522,8 +1522,6 @@ const cartItemsParsed = JSON.parse(rows[0].cartItems);
 
 
 
-
-
 // MODEL TO PREDICT ORDER CANCELLATION
 async function obtenerDatosParaPrediccion(idPedido) {
     try {
@@ -1532,7 +1530,9 @@ async function obtenerDatosParaPrediccion(idPedido) {
             SELECT
                 p.totalPagar AS total_a_pagar,
                 p.idUsuarios,
-                p.idNoClientes
+                p.idNoClientes,
+                p.tipoPedido,
+                DATEDIFF(p.fechaInicio, p.fechaRegistro) AS dias_anticipacion
             FROM tblpedidos p
             WHERE p.idPedido = ?;
         `;
@@ -1577,14 +1577,26 @@ async function obtenerDatosParaPrediccion(idPedido) {
             tasaCancelaciones = tasaRows[0].tasa;
         }
 
-        // 4. Build the final object for the Python API
+        // 4. Calculate total state changes for the order
+        const queryCambiosEstado = `
+            SELECT COUNT(*) AS total_cambios_estado
+            FROM tblhistorialestados
+            WHERE idPedido = ?;
+        `;
+        const [cambiosRows] = await pool.query(queryCambiosEstado, [idPedido]);
+        const totalCambiosEstado = cambiosRows[0]?.total_cambios_estado || 0;
+
+        // 5. Build the final object for the Python API
         const datosParaAPI = {
+            cat__canal_pedido_Presencial: pedido.tipoPedido === 'Manual' ? 1 : 0,
             num__total_a_pagar: parseFloat(pedido.total_a_pagar) || 0,
+            num__dias_anticipacion: parseInt(pedido.dias_anticipacion) || 0,
             num__total_cantidad_productos: parseInt(metricasProductos.total_cantidad_productos) || 0,
             num__total_productos_distintos: parseInt(metricasProductos.total_productos_distintos) || 0,
             num__stock_minimo_del_pedido: parseInt(metricasProductos.stock_minimo_del_pedido) || 0,
             num__total_categorias_distintas: parseInt(metricasProductos.total_categorias_distintas) || 0,
-            num__tasa_cancelaciones_historicas_cliente: parseFloat(tasaCancelaciones) || 0
+            num__tasa_cancelaciones_historicas_cliente: parseFloat(tasaCancelaciones) || 0,
+            num__total_cambios_estado: parseInt(totalCambiosEstado) || 0
         };
 
         console.log("Datos preparados para la API:", datosParaAPI);
@@ -1626,7 +1638,7 @@ routerPedidos.get("/predecir-pedido/:idPedido", csrfProtection, async (req, res)
         // 2. Fetch prediction data and make API call
         const datosParaPrediccion = await obtenerDatosParaPrediccion(pedido.idPedido);
 
-   console.log("Pedido obtenido para predecir:", datosParaPrediccion);
+        console.log("Datos enviados a la API de predicción:", datosParaPrediccion);
         let prediccion = null;
 
         if (datosParaPrediccion) {
@@ -1662,6 +1674,7 @@ routerPedidos.get("/predecir-pedido/:idPedido", csrfProtection, async (req, res)
         res.status(500).json({ success: false, error: "Ocurrió un error interno al procesar la predicción." });
     }
 });
+
 
 
 
