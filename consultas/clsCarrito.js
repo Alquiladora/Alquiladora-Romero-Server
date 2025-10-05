@@ -149,177 +149,162 @@ GROUP BY ca.idCarrito, p.idProducto, pc.idProductoColores, i.idProductoColor;
   }
 });
 
+
+const MESSAGES = {
+  INVALID_DATA: "Datos inválidos",
+  INSUFFICIENT_STOCK: "Stock insuficiente",
+  SUCCESS: "Producto agregado al carrito",
+  ERROR: "Error al agregar producto",
+};
+
+// Función de respaldo con la consulta CORREGIDA
+const getFallbackRecommendations = async (connection) => {
+  const [populares] = await connection.query(
+    `
+    SELECT 
+      p.idProducto, 
+      p.nombre, 
+      pr.precioAlquiler,
+      MIN(pc.idProductoColores) AS idProductoColores, -- CORREGIDO
+      MIN(c.color) AS color,
+      MIN(f.urlFoto) AS imagenProducto,
+      SUM(i.stock) AS stockDisponible,
+      sc.nombre AS nombreSubcategoria,
+      cat.nombre AS nombreCategoria
+    FROM tblproductos p
+    JOIN tblproductoscolores pc ON p.idProducto = pc.idProducto
+    JOIN tblcolores c ON pc.idColor = c.idColores
+    JOIN tblprecio pr ON p.idProducto = pr.idProducto
+    LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+    LEFT JOIN tblfotosproductos f ON p.idProducto = f.idProducto
+    JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+    JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
+    WHERE i.stock > 0
+    GROUP BY p.idProducto, p.nombre, pr.precioAlquiler, sc.nombre, cat.nombre
+    ORDER BY p.popularidad DESC
+    LIMIT 5
+    `
+  );
+  return populares;
+};
+
+
 routerCarrito.post("/agregar", verifyToken, async (req, res) => {
   const { idUsuario, idProductoColor, cantidad, precioAlquiler } = req.body;
-  if (
-    !idUsuario ||
-    !idProductoColor ||
-    !cantidad ||
-    cantidad <= 0 ||
-    !precioAlquiler
-  ) {
-    return res.status(400).json({ mensaje: "Datos inválidos" });
+
+  if (!idUsuario || !idProductoColor || cantidad <= 0 || !precioAlquiler) {
+    return res.status(400).json({ success: false, mensaje: "Datos de entrada inválidos." });
   }
 
   const connection = await pool.getConnection();
+
   try {
     await connection.beginTransaction();
 
-    console.log(
-      "Datos recibidos",
-      idUsuario,
-      idProductoColor,
-      cantidad,
-      precioAlquiler
-    );
-
-    const [inventario] = await connection.query(
-      ` SELECT i.stock, i.stockReservado 
-        FROM tblinventario i 
-        JOIN tblbodegas b ON i.idBodega = b.idBodega  
-        WHERE i.idProductoColor = ?
-        AND b.es_principal = 1 
-        FOR UPDATE; 
+    const [result] = await connection.query(
+      `
+      UPDATE tblinventario i 
+      JOIN tblbodegas b ON i.idBodega = b.idBodega 
+      SET i.stockReservado = i.stockReservado + ? 
+      WHERE i.idProductoColor = ? 
+      AND b.es_principal = 1 
+      AND i.stock >= ?
       `,
-      [idProductoColor]
+      [cantidad, idProductoColor, cantidad]
     );
 
-    if (inventario.length === 0 || inventario[0].stock < cantidad) {
+    if (result.affectedRows === 0) {
       await connection.rollback();
-      return res.status(400).json({ mensaje: "Stock insuficiente" });
+      return res.status(400).json({ mensaje: MESSAGES.INSUFFICIENT_STOCK });
     }
 
-    // await connection.query(
-    //   "UPDATE tblinventario i JOIN tblbodegas b ON i.idBodega = b.idBodega SET i.stock = stock - ?, i.stockReservado = stockReservado + ? WHERE i.idProductoColor = ? AND b.es_principal = 1",
-    //   [cantidad, cantidad, idProductoColor]
-    // );
-
     await connection.query(
-      "UPDATE tblinventario i JOIN tblbodegas b ON i.idBodega = b.idBodega SET  i.stockReservado = stockReservado + ? WHERE i.idProductoColor = ? AND b.es_principal = 1",
-      [cantidad, idProductoColor]
-    );
-
-    await connection.query(
-      "INSERT INTO tblcarrito (idUsuario, idProductoColor, cantidad, precioAntes,precioProducto, fechaAgregado) VALUES (?, ?, ?, ?,?, NOW())",
+      `
+      INSERT INTO tblcarrito (idUsuario, idProductoColor, cantidad, precioAntes, precioProducto, fechaAgregado) 
+      VALUES (?, ?, ?, ?, ?, NOW())
+      `,
       [idUsuario, idProductoColor, cantidad, precioAlquiler, precioAlquiler]
     );
 
-    await connection.commit();
-
-    // En tu routerCarrito.js, dentro de la ruta routerCarrito.post("/agregar", ...)
-    // En tu routerCarrito.js, dentro de la ruta routerCarrito.post("/agregar", ...)
-
     let recomendaciones = [];
     try {
-      console.log("Iniciando proceso de recomendación...");
       const [itemsActuales] = await connection.query(
-        `SELECT DISTINCT p.nombre 
-         FROM tblcarrito ca
-         JOIN tblproductoscolores pc ON ca.idProductoColor = pc.idProductoColores
-         JOIN tblproductos p ON pc.idProducto = p.idProducto
-         WHERE ca.idUsuario = ?`,
+        `
+        SELECT p.nombre 
+        FROM tblcarrito ca
+        JOIN tblproductoscolores pc ON ca.idProductoColor = pc.idProductoColores
+        JOIN tblproductos p ON pc.idProducto = p.idProducto
+        WHERE ca.idUsuario = ?
+        GROUP BY p.nombre
+        `,
         [idUsuario]
       );
-      const nombresDeProductosEnCarrito = itemsActuales.map(
-        (item) => item.nombre
-      );
 
-      console.log(
-        "Productos en carrito para recomendación:",
-        nombresDeProductosEnCarrito
-      );
-
-      if (nombresDeProductosEnCarrito.length > 0) {
-        const responseRecomendador = await axios.post(
+      const nombresProductos = itemsActuales.map((item) => item.nombre);
+      if (nombresProductos.length > 0) {
+        const response = await axios.post(
           "https://modelorecomendacion-l6os.onrender.com/recomendar",
-          {
-            productos: nombresDeProductosEnCarrito,
-          }
+          { productos: nombresProductos },
+          { timeout: 2000 }
         );
-        console.log(
-          "Respuesta de la API de Python:",
-          responseRecomendador.data
-        );
-        const nombresRecomendados = responseRecomendador.data.recomendaciones;
 
-        if (nombresRecomendados && nombresRecomendados.length > 0) {
-          console.log("Nombres recomendados recibidos:", nombresRecomendados);
+        const nombresRecomendados = response.data.recomendaciones || [];
+        if (nombresRecomendados.length > 0) {
           const [productosRecomendados] = await connection.query(
-            `SELECT 
-    p.idProducto, 
-    p.nombre, 
-    p.detalles, 
-    pr.precioAlquiler,
-    pc.idProductoColores,
-    GROUP_CONCAT(DISTINCT c.color ORDER BY c.color SEPARATOR ', ') AS coloresDisponibles,
-    (SELECT urlFoto FROM tblfotosproductos WHERE idProducto = p.idProducto LIMIT 1) AS imagenProducto,
-    SUM(COALESCE(i.stock, 0)) AS stockDisponible,
-    
-   
-    sc.nombre AS nombreSubcategoria,
-    cat.nombre AS nombreCategoria
-
-FROM tblproductos p
-JOIN tblproductoscolores pc ON p.idProducto = pc.idProducto
-JOIN tblcolores c ON pc.idColor = c.idColores
-JOIN tblprecio pr ON p.idProducto = pr.idProducto
-LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
-
-
-JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
-JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
-
-WHERE p.nombre IN (?)
-GROUP BY 
-    p.idProducto, p.nombre, p.detalles, pr.precioAlquiler, imagenProducto, 
-    sc.nombre, cat.nombre
-HAVING stockDisponible > 0;
-`,
+            `
+            SELECT 
+              p.idProducto, 
+              p.nombre, 
+              pr.precioAlquiler,
+              MIN(pc.idProductoColores) AS idProductoColores, -- CORREGIDO
+              MIN(c.color) AS color,
+              MIN(f.urlFoto) AS imagenProducto,
+              SUM(i.stock) AS stockDisponible,
+              sc.nombre AS nombreSubcategoria,
+              cat.nombre AS nombreCategoria
+            FROM tblproductos p
+            JOIN tblproductoscolores pc ON p.idProducto = pc.idProducto
+            JOIN tblcolores c ON pc.idColor = c.idColores
+            JOIN tblprecio pr ON p.idProducto = pr.idProducto
+            LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+            LEFT JOIN tblfotosproductos f ON p.idProducto = f.idProducto
+            JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+            JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
+            WHERE p.nombre IN (?) AND i.stock > 0
+            GROUP BY p.idProducto, p.nombre, pr.precioAlquiler, sc.nombre, cat.nombre
+            LIMIT 5
+            `,
             [nombresRecomendados]
           );
           recomendaciones = productosRecomendados;
         } else {
-          console.log("La API de Python no devolvió recomendaciones.");
+            // Si la API no devuelve recomendaciones, usar el fallback
+            recomendaciones = await getFallbackRecommendations(connection);
         }
       }
-    } catch (recomendacionError) {
-      console.error(
-        "Error DURANTE el proceso de recomendación:",
-        recomendacionError.message
-      );
+    } catch (error) {
+      console.error("Error en API de recomendación, usando fallback:", error.message);
+      recomendaciones = await getFallbackRecommendations(connection);
     }
 
-    const userSockets = getUserSockets();
-    console.log("Usuarios conectados:", Object.keys(userSockets));
-
-    if (userSockets[idUsuario]) {
-      console.log(
-        `Emitiendo 'productoAgregadoCarrito' al usuario ${idUsuario}`
-      );
-      userSockets[idUsuario].emit("productoAgregadoCarrito", {
-        idProductoColor,
-        cantidad,
-        precioAlquiler,
-        mensaje: "✅ Producto agregado al carrito correctamente.",
-      });
-    } else {
-      console.log(`Usuario ${idUsuario} no está conectado al socket`);
-    }
-    console.log("Resuulya¿tado de recoendaciones", recomendaciones);
+    await connection.commit();
 
     res.status(201).json({
       success: true,
-      mensaje: "Producto agregado al carrito",
-      recomendaciones: recomendaciones,
+      mensaje: MESSAGES.SUCCESS,
+      recomendaciones,
     });
   } catch (error) {
     await connection.rollback();
-    console.error("Error al agregar al carrito:", error);
-    res.status(500).json({ mensaje: "Error al agregar producto", error });
+    console.error("Error en la transacción principal:", error);
+    res.status(500).json({ mensaje: MESSAGES.ERROR });
   } finally {
     connection.release();
   }
 });
+
+
+
 
 //Contar cuando productos tiene en el carrito
 routerCarrito.get("/count/:idUsuario", verifyToken, async (req, res) => {

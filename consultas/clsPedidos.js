@@ -18,6 +18,7 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const axios = require("axios");
 const router = require("../rutas");
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const { verifyToken } = require("./clsUsuarios");
 
 const routerPedidos = express.Router();
 routerPedidos.use(express.json());
@@ -1300,6 +1301,91 @@ routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res)
 });
 
 
+routerPedidos.get('/historial-pedidos',verifyToken, csrfProtection, async (req, res) => {
+    const idUsuario = req.user?.id ;
+  const pagina = parseInt(req.query.pagina, 10) || 1;
+  const limite = parseInt(req.query.limite, 10) || 10;
+  const offset = (pagina - 1) * limite;
+
+   if (!idUsuario) {
+      return res.status(401).json({ error: "ID de usuario no encontrado en el token" });
+    }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();  
+    const [pedidos] = await connection.query(
+      `
+      WITH FotosPedidosAleatorias AS (
+    SELECT
+        d.idPedido,
+        f.urlFoto,
+        ROW_NUMBER() OVER(PARTITION BY d.idPedido ORDER BY RAND()) AS rn
+    FROM tblpedidodetalles d
+    JOIN tblproductoscolores pc ON d.idProductoColores = pc.idProductoColores
+    JOIN tblfotosproductos f ON pc.idProducto = f.idProducto
+    GROUP BY d.idPedido, pc.idProducto
+)
+SELECT
+    p.idPedido,
+    p.idRastreo,
+    p.estadoActual AS estado,
+    p.fechaInicio,
+    p.totalPagar,
+    COUNT(d.idDetalle) AS numeroDeProductos,
+   
+    COALESCE(
+        CONCAT(u.nombre, ' ', u.apellidoP, ' ', u.apellidoM),
+        CONCAT(nc.nombre, ' ', nc.apellidoCompleto)
+    ) AS nombreCliente,
+  
+    (
+        SELECT JSON_ARRAYAGG(urlFoto)
+        FROM FotosPedidosAleatorias
+        WHERE idPedido = p.idPedido AND rn <= 2
+    ) AS fotosProductos
+FROM tblpedidos p
+LEFT JOIN tblpedidodetalles d ON p.idPedido = d.idPedido
+
+LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios 
+LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
+WHERE p.idUsuarios = ? 
+GROUP BY p.idPedido, nombreCliente 
+ORDER BY p.idPedido DESC
+
+      LIMIT ? OFFSET ? -- Aplicamos la paginación
+      `,
+      [idUsuario, limite, offset] 
+    );
+    const [[{ totalPedidos }]] = await connection.query(
+      "SELECT COUNT(*) as totalPedidos FROM tblpedidos WHERE idUsuarios = ?",
+      [idUsuario]
+    );
+    res.json({
+      success: true,
+      data: pedidos,
+      paginacion: {
+        totalPedidos: totalPedidos,
+        paginaActual: pagina,
+        totalPaginas: Math.ceil(totalPedidos / limite)
+      }
+    });
+    console.log("Resultado de lso pedidos osa historal de cliente",pedidos)
+
+  } catch (error) {
+    console.error("Error al obtener el historial de pedidos:", error.message);
+    if (error.code === 'ECONNRESET') {
+        return res.status(503).json({ success: false, error: 'Error de conexión con la base de datos, por favor intente de nuevo.' });
+    }
+    res.status(500).json({ success: false, error: 'Error interno del servidor.' });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+
+
+//Verificar si otro componente ocupa este enpoit 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
   try {
     const { idUsuarios } = req.params;

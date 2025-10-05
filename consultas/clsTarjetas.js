@@ -299,21 +299,15 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const { tempPedidoId, idUsuario } = session.metadata;
-
-
     const connection = await pool.getConnection();
-
     try {
       console.log(`Procesando Pedido Temporal: ${tempPedidoId} para Usuario: ${idUsuario}`);
-
-
       const [tempOrders] = await connection.query(
         "SELECT * FROM tblPedidosTemporales WHERE tempPedidoId = ?",
         [tempPedidoId]
       );
 
       if (tempOrders.length === 0) {
-
         console.warn(`Webhook recibido para un pedido temporal no encontrado o ya procesado: ${tempPedidoId}`);
         return res.status(200).json({ received: true, message: 'Pedido no encontrado o ya procesado.' });
       }
@@ -334,11 +328,8 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
         }
       }
       console.log('Stock verificado exitosamente.');
-
-
       await connection.beginTransaction();
       console.log('Transacción iniciada.');
-
       const idRastreo = generateNumericTrackingId();
       const totalPagar = session.amount_total / 100;
       const [pedidoResult] = await connection.query(
@@ -347,19 +338,13 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
       );
       const nuevoPedidoId = pedidoResult.insertId;
       console.log(`Pedido permanente creado con ID: ${nuevoPedidoId}`);
-
-
       for (const item of cartItems) {
         const diasAlquiler = (new Date(tempOrder.fechaEntrega) - new Date(tempOrder.fechaInicio)) / (1000 * 60 * 60 * 24);
         const subtotal = item.cantidad * item.precioPorDia * diasAlquiler;
-
-
         await connection.query(
           `INSERT INTO tblpedidodetalles (idPedido, idProductoColores, cantidad, precioUnitario, diasAlquiler, subtotal, estadoProducto) VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [nuevoPedidoId, item.idProductoColor, item.cantidad, item.precioPorDia, diasAlquiler, subtotal, 'Disponible']
         );
-
-
         await connection.query(
           "UPDATE tblinventario SET stock = stock - ?, stockReservado = stockReservado - ? WHERE idProductoColor = ?",
           [item.cantidad, item.cantidad, item.idProductoColor]
@@ -367,8 +352,6 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
 
       }
       console.log('Detalles de pedido creados y stock actualizado.');
-
-
       await connection.query(
         `INSERT INTO tblpagos (idPedido, formaPago, metodoPago, monto, estadoPago, detallesPago) VALUES (?, ?, ?, ?, ?, ?)`,
         [nuevoPedidoId, 'Tarjeta', session.payment_method_types[0], totalPagar, 'Completado', session.payment_intent]
@@ -395,8 +378,6 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
       connection.release();
     }
   }
-
-
   res.json({ received: true });
 });
 
