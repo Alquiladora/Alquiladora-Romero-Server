@@ -107,14 +107,16 @@ async function getEntregaReal(fechaInicio, fechaRegistro) {
   return null; // Casos no válidos
 }
 
+
+
 routerRepartidorPedidos.get("/pedidos", async (req, res) => {
   try {
     const today = todayMx();
-
     const fechaMinimaEntrega = moment(today).subtract(14, "days").format("YYYY-MM-DD");
     const fechaMaximaEntrega = moment(today).add(8, "days").format("YYYY-MM-DD");
-    const fechaEntregaRecogidaLimite = moment(today).format("YYYY-MM-DD"); 
+    const fechaEntregaRecogidaLimite = moment(today).format("YYYY-MM-DD");
 
+    // 🚀 Subconsulta para pagos en vez de GROUP BY
     const [rows] = await pool.query(
       `
       SELECT
@@ -124,8 +126,8 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         p.idRastreo,
         p.estadoActual,
         p.totalPagar,
-        COALESCE(SUM(pg.monto), 0) AS totalPagado,
-        (COALESCE(SUM(pg.monto), 0) >= p.totalPagar) AS isFullyPaid,
+        COALESCE(pg.totalPagado, 0) AS totalPagado,
+        (COALESCE(pg.totalPagado, 0) >= p.totalPagar) AS isFullyPaid,
         p.fechaInicio,
         p.fechaEntrega,
         p.horaAlquiler,
@@ -141,12 +143,16 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         d.direccion,
         d.referencias
       FROM tblpedidos p
-      LEFT JOIN tblpagos pg ON p.idPedido = pg.idPedido
+      LEFT JOIN (
+        SELECT idPedido, SUM(monto) AS totalPagado
+        FROM tblpagos
+        GROUP BY idPedido
+      ) pg ON p.idPedido = pg.idPedido
       INNER JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
       LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
       WHERE (
         (
-          LOWER(p.estadoActual) IN ('confirmado')
+          LOWER(p.estadoActual) = 'confirmado'
           AND p.fechaInicio >= ?
           AND p.fechaInicio < ?
         )
@@ -158,11 +164,11 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
           )
         )
       )
-      GROUP BY p.idPedido
       `,
       [fechaMinimaEntrega, fechaMaximaEntrega, fechaEntregaRecogidaLimite]
     );
 
+    // 🚀 Procesamiento en Node
     const deliveries = [];
     const lateDeliveries = [];
     const pickups = [];
@@ -179,8 +185,10 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         moment.tz(r.fechaRegistro, "America/Mexico_City").isSame(today, "day") &&
         moment.tz(r.fechaInicio, "America/Mexico_City").isSame(today, "day");
 
-      if (r.estadoActual.toLowerCase() === "confirmado" || r.estadoActual.toLowerCase() === "enviando") {
-        const esAtrasado = moment(r.fechaInicio).isBefore(today, "day") || (entregaReal && entregaReal.isBefore(today, "day"));
+      if (["confirmado", "enviando"].includes(r.estadoActual.toLowerCase())) {
+        const esAtrasado =
+          moment(r.fechaInicio).isBefore(today, "day") ||
+          (entregaReal && entregaReal.isBefore(today, "day"));
 
         const entregaObj = {
           ...r,
@@ -200,7 +208,6 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
           deliveries.push(entregaObj);
           if (dayOfWeek !== 0) daysSet.add(entregaRealStr);
         }
-        continue;
       }
 
       if (r.estadoActual.toLowerCase() === "en alquiler") {
@@ -230,50 +237,45 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
     });
 
     const totalsByLocation = {};
+    const todos = [...deliveries, ...lateDeliveries, ...pickups];
 
-  const todos = [...deliveries, ...lateDeliveries, ...pickups];
+    for (const r of todos) {
+      const key = `${r.direccionEstado}||${r.municipio}||${r.localidad}`;
+      if (!totalsByLocation[key]) {
+        totalsByLocation[key] = {
+          estado: r.direccionEstado,
+          municipio: r.municipio,
+          localidad: r.localidad,
+          count: 0,
+        };
+      }
+      totalsByLocation[key].count++;
+    }
 
-todos.forEach((r) => {
-  const key = `${r.direccionEstado}||${r.municipio}||${r.localidad}`;
-  if (!totalsByLocation[key]) {
-    totalsByLocation[key] = {
-      estado: r.direccionEstado,
-      municipio: r.municipio,
-      localidad: r.localidad,
-      count: 0,
-    };
-  }
-  totalsByLocation[key].count++;
-});
-
-
-    const [[{ totalPedidosHoy }]] = await pool.query(
+    // 🚀 Unificar conteos en una sola consulta
+    const [[stats]] = await pool.query(
       `
-      SELECT COUNT(*) AS totalPedidosHoy
-      FROM tblpedidos p
-      LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
-      WHERE (
+      SELECT
+        (SELECT COUNT(*) FROM tblpedidos) AS totalPedidos,
+        (SELECT COUNT(*) FROM tblrepartidores) AS totalRepartidores,
+        (SELECT COUNT(*) FROM tblasignacionpedidos) AS totalPedidosAsignados,
         (
-          LOWER(p.estadoActual) IN ('confirmado', 'enviando')
-          AND DATE(CONVERT_TZ(p.fechaInicio, '+00:00', '-06:00')) = ?
-        )
-        OR (
-          LOWER(p.estadoActual) = 'en alquiler'
-          AND DATE(CONVERT_TZ(p.fechaEntrega, '+00:00', '-06:00')) = ?
-        )
-      )
+          SELECT COUNT(*) 
+          FROM tblpedidos p
+          LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
+          WHERE (
+            (
+              LOWER(p.estadoActual) IN ('confirmado', 'enviando')
+              AND DATE(CONVERT_TZ(p.fechaInicio, '+00:00', '-06:00')) = ?
+            )
+            OR (
+              LOWER(p.estadoActual) = 'en alquiler'
+              AND DATE(CONVERT_TZ(p.fechaEntrega, '+00:00', '-06:00')) = ?
+            )
+          )
+        ) AS totalPedidosHoy
       `,
       [today.format("YYYY-MM-DD"), moment(today).subtract(1, "day").format("YYYY-MM-DD")]
-    );
-
-    const [[{ totalPedidos }]] = await pool.query(
-      "SELECT COUNT(*) AS totalPedidos FROM tblpedidos"
-    );
-    const [[{ totalRepartidores }]] = await pool.query(
-      "SELECT COUNT(*) AS totalRepartidores FROM tblrepartidores"
-    );
-    const [[{ totalPedidosAsignados }]] = await pool.query(
-      "SELECT COUNT(*) AS totalPedidosAsignados FROM tblasignacionpedidos"
     );
 
     return res.json({
@@ -283,10 +285,7 @@ todos.forEach((r) => {
       lateDeliveries,
       pickups,
       totalsByLocation: Object.values(totalsByLocation),
-      totalPedidos,
-      totalRepartidores,
-      totalPedidosAsignados,
-      totalPedidosHoy,
+      ...stats,
     });
   } catch (err) {
     console.error("Error al obtener pedidos:", err);
@@ -1187,8 +1186,8 @@ routerRepartidorPedidos.get("/repartidores/historial/:idPedido/detalles",  async
 
 routerRepartidorPedidos.get("/repartidor/datos", verifyToken, csrfProtection, async (req, res) => {
   try {
-    const idUsuario = req.user?.id ; // ID del usuario autenticado desde el token JWT
-    console.log("Id de datos repartidor:", idUsuario);
+    const idUsuario = req.user?.id ;
+   
 
     if (!idUsuario) {
       return res.status(401).json({ error: "ID de usuario no encontrado en el token" });

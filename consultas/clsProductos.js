@@ -23,6 +23,44 @@ dayjs.extend(tz);
 
 produtosRouter.get("/products", async (req, res) => {
   try {
+
+     const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const search = req.query.search ? `%${req.query.search.toLowerCase()}%` : null;
+    const category = req.query.category || null;
+
+    // Build WHERE clause
+    let whereClause = '';
+    const params = [];
+    
+    if (search || category) {
+      whereClause = 'WHERE ';
+      if (search) {
+        whereClause += 'LOWER(p.nombre) LIKE ? ';
+        params.push(search);
+        if (category) whereClause += 'AND ';
+      }
+      if (category) {
+        whereClause += 'c.nombre = ? ';
+        params.push(category);
+      }
+    }
+
+   
+
+      const [countResult] = await pool.query(`
+      SELECT COUNT(*) as total
+      FROM tblproductos p
+      LEFT JOIN tblsubcategoria s ON p.idSubcategoria = s.idSubcategoria
+      LEFT JOIN tblcategoria c ON s.idCategoria = c.idCategoria
+      ${whereClause}
+    `, params);
+    const totalRecords = countResult[0].total;
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    const queryParams = [...params, limit, offset];
     const [rows] = await pool.query(`
 SELECT 
     p.idProducto,
@@ -67,17 +105,28 @@ LEFT JOIN tblbodegas b
        ON i.idBodega = b.idBodega
 LEFT JOIN tblfotosproductos f 
        ON p.idProducto = f.idProducto
-
+${whereClause}
 GROUP BY p.idProducto
-ORDER BY p.idProducto DESC;
-      `);
+ORDER BY p.idProducto DESC
+LIMIT ? OFFSET ?
+      `, queryParams);
 
-    res.status(200).json({ success: true, products: rows });
+    res.status(200).json({
+      success: true,
+      products: rows,
+      pagination: {
+        currentPage: page,
+        totalPages: totalPages,
+        totalRecords: totalRecords,
+        limit: limit
+      }
+    });
   } catch (error) {
     console.error("Error al obtener productos:", error);
     res.status(500).json({
       success: false,
       message: "Error interno del servidor",
+      error: error.message
     });
   }
 });
@@ -130,7 +179,7 @@ produtosRouter.get("/subcategorias", async (req, res) => {
       JOIN tblsubcategoria sc ON c.idCategoria = sc.idCategoria
       ORDER BY c.nombre, sc.nombre
     `);
-    connection.release(); // Libera la conexión después de la consulta
+    connection.release(); 
 
     const categoryMap = {};
     rows.forEach((row) => {
@@ -965,8 +1014,10 @@ WHERE EXISTS (
 
 
 produtosRouter.get("/pedidos-manual", csrfProtection, async (req, res) => {
+   let connection;
   try {
-    const [rows] = await pool.query(
+   connection = await pool.getConnection(); 
+    const [rows] = await connection.query(
       `
         SELECT
     p.idProducto,
@@ -1021,6 +1072,9 @@ FROM tblinventario inv
   } catch (error) {
     console.error("Error en endpoint de inventario", error);
     res.status(500).json({ error: "Error al obtener los datos del inventario" });
+  
+   } finally {
+    if (connection) connection.release(); // <-- liberar siempre la conexión
   }
 });
 

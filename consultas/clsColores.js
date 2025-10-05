@@ -141,12 +141,24 @@ coloresRouter.delete("/colores/:id", csrfProtection, async (req, res) => {
       return res.status(404).json({ success: false, message: "Color no encontrado." });
     }
 
+     const [associations] = await pool.query(
+      "SELECT idProductoColores FROM tblproductoscolores WHERE idColor = ?",
+      [id]
+    );
+
+    if (associations.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Este color no se puede eliminar porque está asociado a uno o más productos."
+      });
+    }
+
     const query = "DELETE FROM tblcolores WHERE idColores = ?";
     await pool.query(query, [id]);
 
     res.status(200).json({ success: true, message: "Color eliminado exitosamente." });
   } catch (error) {
-    console.error(`[${moment().format("YYYY-MM-DD HH:mm:ss")}] Error al eliminar color:`, error);
+ 
     res.status(500).json({ success: false, message: "Error al eliminar el color.", error: error.message });
   }
 });

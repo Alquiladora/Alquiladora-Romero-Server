@@ -8,6 +8,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
   },
+    tls: {
+    rejectUnauthorized: false, // ignora certificados no confiables en local
+  },
 });
 
  async  function sendEmail(to, subject, htmlContent) {

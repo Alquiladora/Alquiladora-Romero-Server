@@ -40,7 +40,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 //========================COOKIES================================================
-
+const isProd = process.env.NODE_ENV === "development";
 
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
@@ -187,8 +187,6 @@ usuarioRouter.post("/login", async (req, res, next) => {
   try {
     const { email, contrasena, tokenMFA, deviceType, captchaToken, ip } =
       req.body;
-
-      console.log("datos recibidos desde login ",email, contrasena, )
     const clientTimestamp = obtenerFechaMexico();
 
     if (!email || !contrasena) {
@@ -212,8 +210,6 @@ usuarioRouter.post("/login", async (req, res, next) => {
         .json({ message: "Validación de reCAPTCHA fallida." });
     }
 
-    console.log("Resultado de reCAPTCHA (login):", recaptchaResult);
-
     const cookiesId = uuidv4();
 
     if (!pool) {
@@ -234,7 +230,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
 
     //===================================================================================================
 
-      // ==== BLOQUEO ====
+    // ==== BLOQUEO ====
     // Si verificarBloqueo envía res, salimos
     if (await VerificarBloqueo(usuario, res)) {
       return;
@@ -249,8 +245,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
       return res.status(401).json({ message: "Credenciales Incorrectos" });
     }
     //==============================================================MFA ATIVADO=====================
-    console.log("Este es e multifactor", usuario.multifaltor);
-    console.log("Datos de tokenMfa", tokenMFA)
+ 
 
     if (usuario.multifaltor) {
       if (!tokenMFA) {
@@ -267,8 +262,8 @@ usuarioRouter.post("/login", async (req, res, next) => {
         usuario.multifaltor
       );
 
-      console.log("Datos a mostra de mfa para validar",isValidMFA);
-      
+      console.log("Datos a mostra de mfa para validar", isValidMFA);
+
       if (!isValidMFA) {
         return res.status(400).json({ message: "Código MFA incorrecto." });
       }
@@ -284,22 +279,20 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Crear la cookie de sesión
     res.cookie("sesionToken", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure:isProd ,
       sameSite: "None",
       maxAge: TOKEN_EXPIRATION_TIME,
     });
 
     // Insertar la sesión en tblsesiones
     try {
-     
-     
       await pool.query(`
       INSERT INTO tblsesiones 
-        (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie, horaFin)
-      VALUES (?, ?, ?, ?, ?, ?, NULL)
-    `, 
-        [ usuario.idUsuarios,cookiesId,clientTimestamp,ip,deviceType,token]);
-      console.log(`Sesión insertada en tblsesiones para usuario ${usuario.idUsuarios}`);
+        (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+        [usuario.idUsuarios, cookiesId, clientTimestamp, ip, deviceType, token]);
+    
     } catch (insertError) {
       console.error("Error al insertar la sesión en tblsesiones:", insertError);
       next(error);
@@ -331,65 +324,63 @@ usuarioRouter.post("/login", async (req, res, next) => {
     });
 
     console.log("Login exitoso");
-  } catch (error) {
-    console.error("Error en el login:", error);
-    next(error);
-  }
+  } catch (insertError) {
+  next(insertError); 
+}
 });
 
 
 //=============================FUNCION DE BLOQUEO
 async function VerificarBloqueo(usuario, res) {
-   const [bloqueos] = await pool.query(
-      "SELECT intentos, bloqueado, lock_until FROM tblipbloqueados WHERE idUsuarios = ?",
-      [usuario.idUsuarios]
-    );
+  const [bloqueos] = await pool.query(
+    "SELECT intentos, bloqueado, lock_until FROM tblipbloqueados WHERE idUsuarios = ?",
+    [usuario.idUsuarios]
+  );
 
-    if (bloqueos.length > 0) {
-      const bloqueo = bloqueos[0];
-      const ahora = new Date();
+  if (bloqueos.length > 0) {
+    const bloqueo = bloqueos[0];
+    const ahora = new Date();
 
-      const lockUntil = bloqueo.lock_until ? new Date(bloqueo.lock_until) : null;
+    const lockUntil = bloqueo.lock_until ? new Date(bloqueo.lock_until) : null;
 
-      if (bloqueos.bloqueado === 1) {
-        return res.status(403).json({
-          message: "Cuenta bloqueada por el administrador.",
-        });
+    if (bloqueos.bloqueado === 1) {
+      return res.status(403).json({
+        message: "Cuenta bloqueada por el administrador.",
+      });
+    }
+
+    if (lockUntil && lockUntil <= ahora) {
+
+
+      await pool.query(` UPDATE tblipbloqueados SET intentos = 0, lock_until = NULL  WHERE idUsuarios = ?`,
+        [usuario.idUsuarios]);
+
+      bloqueo.intentos = 0;
+      bloqueo.lock_until = null;
+  
+    } else if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
+      if (!lockUntil) {
+        const lockTime = new Date(ahora.getTime() + LOCK_TIME);
+        await pool.query(` UPDATE tblipbloqueados SET lock_until = ? WHERE idUsuarios = ?`,
+          [lockTime, usuario.idUsuarios]);
+        bloqueo.lock_until = lockTime;
       }
 
-      if (lockUntil && lockUntil <= ahora) {
-        console.log(  "El tiempo de bloqueo ha expirado. Desbloqueando usuario..." );
-
-        await pool.query( ` UPDATE tblipbloqueados SET intentos = 0, lock_until = NULL  WHERE idUsuarios = ?`,
-         [usuario.idUsuarios]);
-       
-        bloqueo.intentos = 0;
-        bloqueo.lock_until = null;
-        console.log(`Usuario ${usuario.idUsuarios} desbloqueado correctamente.`);
-      }else if (bloqueo.intentos >= MAX_FAILED_ATTEMPTS) {
-        if (!lockUntil) {
-          const lockTime = new Date(ahora.getTime() + LOCK_TIME);
-          await pool.query(` UPDATE tblipbloqueados SET lock_until = ? WHERE idUsuarios = ?`,
-             [lockTime, usuario.idUsuarios]);
-          bloqueo.lock_until = lockTime;
-        }
-
-        const tiempoRestanteSegundos = Math.ceil((new Date(bloqueo.lock_until) - ahora) / 1000);
-        const tiempoRestanteMensaje = tiempoRestanteSegundos >= 60
-        ? `${Math.floor(tiempoRestanteSegundos / 60)} minuto${tiempoRestanteSegundos >= 120 ? 's' : ''}${
-            tiempoRestanteSegundos % 60 > 0 ? ` y ${tiempoRestanteSegundos % 60} segundo${tiempoRestanteSegundos % 60 !== 1 ? 's' : ''}` : ''
-          }`
+      const tiempoRestanteSegundos = Math.ceil((new Date(bloqueo.lock_until) - ahora) / 1000);
+      const tiempoRestanteMensaje = tiempoRestanteSegundos >= 60
+        ? `${Math.floor(tiempoRestanteSegundos / 60)} minuto${tiempoRestanteSegundos >= 120 ? 's' : ''}${tiempoRestanteSegundos % 60 > 0 ? ` y ${tiempoRestanteSegundos % 60} segundo${tiempoRestanteSegundos % 60 !== 1 ? 's' : ''}` : ''
+        }`
         : `${tiempoRestanteSegundos} segundo${tiempoRestanteSegundos !== 1 ? 's' : ''}`;
 
 
-        return res.status(403).json({
-          message: `Usuario bloqueado temporalmente. Inténtalo de nuevo en ${tiempoRestanteMensaje}.`,
-          tiempoRestante: tiempoRestanteSegundos,
-        });
-      }
+      return res.status(403).json({
+        message: `Usuario bloqueado temporalmente. Inténtalo de nuevo en ${tiempoRestanteMensaje}.`,
+        tiempoRestante: tiempoRestanteSegundos,
+      });
     }
+  }
 
-   return false;
+  return false;
 }
 
 //================================Manejo de intentos fallidos de login=======================================
@@ -471,16 +462,15 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //====================Consulta de perfil de usuario========================================================0
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
+  try {
+    const token = req.cookies?.sesionToken;
 
-  try{
-     const token = req.cookies?.sesionToken;
-
-   if (!token) {
+    if (!token) {
       return res.status(403).json({ message: "Token no proporcionado. Acceso denegado." });
     }
-  
+
     const decoded = jwt.verify(token, SECRET_KEY);
-    
+
     const sessionQuery = `
        SELECT 1 FROM tblsesiones 
       WHERE idUsuarios = ? AND cookie = ? AND horaFin IS NULL
@@ -489,7 +479,7 @@ const verifyToken = async (req, res, next) => {
     `;
 
     const [sessions] = await pool.query(sessionQuery, [decoded.id, token]);
-    
+
     if (sessions.length === 0) {
       return res.status(401).json({
         message:
@@ -497,7 +487,7 @@ const verifyToken = async (req, res, next) => {
       });
     }
 
-   req.user = {
+    req.user = {
       id: decoded.id,
       nombre: decoded.nombre,
       rol: decoded.rol,
@@ -616,7 +606,7 @@ usuarioRouter.get("/perfil-simple", verifyToken, async (req, res) => {
 
 
 //CCERRAMOS SESION
-usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res) => {
+usuarioRouter.post("/Delete/login", csrfProtection, verifyToken, async (req, res) => {
   const token = req.cookies.sesionToken;
   const HoraFinal = obtenerFechaMexico();
   console.log("ESte es el tookie que recibe", token);
@@ -645,7 +635,7 @@ usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res)
     }
     res.clearCookie("sesionToken", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure:isProd ,
       sameSite: "None",
     });
     console.log("sesion cerrada correctamente");
@@ -659,7 +649,7 @@ usuarioRouter.post("/Delete/login", csrfProtection,verifyToken, async (req, res)
 //CeRRAR TODAS LAS CESIONES
 usuarioRouter.post(
   "/Delete/login/all-except-current",
-  csrfProtection,verifyToken,
+  csrfProtection, verifyToken,
   async (req, res) => {
     const token = req.cookies.sesionToken;
     const HoraFinal = obtenerFechaMexico();
@@ -705,7 +695,7 @@ usuarioRouter.post(
 );
 
 //Sesiones
-usuarioRouter.post("/sesiones", csrfProtection,verifyToken, async (req, res) => {
+usuarioRouter.post("/sesiones", csrfProtection, verifyToken, async (req, res) => {
   const { userId } = req.body;
   if (!userId) {
     return res.status(400).json({ message: "El userId es obligatorio." });
@@ -811,7 +801,7 @@ usuarioRouter.post("/enable-mfa", async (req, res) => {
 
 //============================================================================
 //Actualizamos el foto de perfil
-usuarioRouter.patch("/perfil/:id/foto",verifyToken, async (req, res) => {
+usuarioRouter.patch("/perfil/:id/foto", verifyToken, async (req, res) => {
   const userId = req.params.id;
   console.log("perfil", userId);
   const { fotoPerfil } = req.body;
@@ -854,7 +844,7 @@ usuarioRouter.patch("/perfil/:id/foto",verifyToken, async (req, res) => {
 
 //===============================================================================================
 //Actulizar el dato de usaurio en especifico
-usuarioRouter.patch("/perfil/:id/:field", csrfProtection,verifyToken, async (req, res) => {
+usuarioRouter.patch("/perfil/:id/:field", csrfProtection, verifyToken, async (req, res) => {
   let { id, field } = req.params;
   let { value } = req.body;
 
@@ -930,7 +920,7 @@ usuarioRouter.patch("/perfil/:id/:field", csrfProtection,verifyToken, async (req
 //======================================
 
 //==================================================SOSPECHOSOS
-usuarioRouter.get("/usuarios-sospechosos",verifyToken, async (req, res) => {
+usuarioRouter.get("/usuarios-sospechosos", verifyToken, async (req, res) => {
   const minIntentosReales =
     req.query.minIntentos !== undefined
       ? parseInt(req.query.minIntentos)
@@ -953,7 +943,7 @@ usuarioRouter.get("/usuarios-sospechosos",verifyToken, async (req, res) => {
   }
 });
 
-usuarioRouter.post("/bloquear/:idUsuario",verifyToken, async (req, res) => {
+usuarioRouter.post("/bloquear/:idUsuario", verifyToken, async (req, res) => {
   const { idUsuario } = req.params;
 
   try {
@@ -969,7 +959,7 @@ usuarioRouter.post("/bloquear/:idUsuario",verifyToken, async (req, res) => {
   }
 });
 
-usuarioRouter.post("/desbloquear/:idUsuario",verifyToken, async (req, res) => {
+usuarioRouter.post("/desbloquear/:idUsuario", verifyToken, async (req, res) => {
   const { idUsuario } = req.params;
 
   try {
@@ -1042,7 +1032,7 @@ usuarioRouter.post(
   }
 );
 
-usuarioRouter.post("/verify-password", csrfProtection,verifyToken, async (req, res) => {
+usuarioRouter.post("/verify-password", csrfProtection, verifyToken, async (req, res) => {
   const { idUsuario, currentPassword } = req.body;
 
   if (!idUsuario || !currentPassword) {
@@ -1199,7 +1189,7 @@ usuarioRouter.post("/change-password", csrfProtection, async (req, res) => {
 });
 
 //Verifcar el el usaurio solo pueda cambiatr su correo 5 veces * semana
-usuarioRouter.get("/vecesCambioPass",verifyToken, async (req, res) => {
+usuarioRouter.get("/vecesCambioPass", verifyToken, async (req, res) => {
   try {
     const { idUsuario } = req.query;
 
@@ -1241,7 +1231,7 @@ usuarioRouter.get("/vecesCambioPass",verifyToken, async (req, res) => {
   }
 });
 
-usuarioRouter.get("/lista",verifyToken, async (req, res, next) => {
+usuarioRouter.get("/lista", verifyToken, async (req, res, next) => {
   try {
     const [usuarios] = await pool.query(`
  SELECT 
@@ -1264,7 +1254,7 @@ usuarioRouter.get("/lista",verifyToken, async (req, res, next) => {
   }
 });
 
-usuarioRouter.get("/:idUsuario/sesiones",verifyToken, async (req, res, next) => {
+usuarioRouter.get("/:idUsuario/sesiones", verifyToken, async (req, res, next) => {
   const { idUsuario } = req.params;
   try {
     const [sesiones] = await pool.query(
@@ -1360,13 +1350,13 @@ usuarioRouter.put('/:userId/rol', csrfProtection, verifyToken, async (req, res) 
       );
 
       if (rows.length === 0) {
-        
+
         await pool.query(
           'INSERT INTO tblrepartidores (idUsuario, activo) VALUES (?, 1)',
           [userId]
         );
       } else if (rows[0].activo === 0) {
-      
+
         await pool.query(
           `UPDATE tblrepartidores
              SET activo = 1,
@@ -1393,7 +1383,7 @@ usuarioRouter.put('/:userId/rol', csrfProtection, verifyToken, async (req, res) 
       [userId]
     );
     if (rows.length > 0 && rows[0].activo === 1) {
-      
+
       return res.status(400).json({
         message:
           'No se puede cambiar el rol: el usuario está activo como repartidor hasta que se desactive.',
@@ -1408,7 +1398,7 @@ usuarioRouter.put('/:userId/rol', csrfProtection, verifyToken, async (req, res) 
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
- 
+
     if (rows.length > 0 && rows[0].activo === 0) {
       return res.json({ message: 'Repartidor dado de baja: ahora es ' + rol + '.' });
     }
@@ -1429,50 +1419,59 @@ async function verificarYLimpiarNoClientes() {
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
-
+    //Seleccionamos lo clientes que no se han registrado y ya paso mas de 1 mes de su ultimo pedido y sus pedidso estan en esatdo finalizado y cancelado
     const [noClientes] = await connection.query(`
-      SELECT DISTINCT nc.idNoClientes
+     SELECT nc.idNoClientes
 FROM tblnoclientes nc
-INNER JOIN tblpedidos p ON nc.idNoClientes = p.idNoClientes
-WHERE p.estadoActual IN ('Finalizado', 'Cancelado')
-  AND p.fechaRegistro < DATE_SUB(NOW(), INTERVAL 1 MONTH)
-  AND nc.idUsuario IS NULL;
+LEFT JOIN tblpedidos p ON nc.idNoClientes = p.idNoClientes
+WHERE nc.idUsuario IS NULL
+GROUP BY nc.idNoClientes
+HAVING SUM(CASE WHEN p.estadoActual NOT IN ('Finalizado','Cancelado') THEN 1 ELSE 0 END) = 0
+   AND MAX(p.fechaRegistro) < DATE_SUB(NOW(), INTERVAL 3 MONTH);
 
     `);
 
     if (noClientes.length === 0) {
       console.log("No hay no clientes para eliminar.");
+      await connection.commit();
       return;
     }
 
     const idsNoClientes = noClientes.map((nc) => nc.idNoClientes);
 
     await connection.query(
-      `
-      DELETE p, d, nc
-      FROM tblpedidos p
-      JOIN tbldireccioncliente d ON p.idNoClientes = d.idNoClientes
-      JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes
-      WHERE p.idNoClientes IN (?);
-    `,
+      `DELETE FROM tblpedidos WHERE idNoClientes IN (?);`,
       [idsNoClientes]
     );
 
-    console.log(`Eliminados ${idsNoClientes.length} no clientes.`);
+    await connection.query(
+      `DELETE FROM tbldireccioncliente WHERE idNoClientes IN (?);`,
+      [idsNoClientes]
+    );
+
+    await connection.query(
+      `DELETE FROM tblnoclientes WHERE idNoClientes IN (?);`,
+      [idsNoClientes]
+    );
     await connection.commit();
+    console.log(`✅ Eliminados ${idsNoClientes.length} no clientes.`);
   } catch (error) {
-    console.error("Error en la verificación y limpieza de no clientes:", error);
+    console.error("❌ Error en la verificación y limpieza de no clientes:", error);
     if (connection) {
       try {
         await connection.rollback();
+        console.log("Rollback ejecutado correctamente.");
       } catch (rollbackError) {
-        console.error("Error al hacer rollback:", rollbackError);
+        console.error("❌ Error al hacer rollback:", rollbackError);
       }
     }
   } finally {
     if (connection) connection.release();
   }
 }
+
+
+
 
 cron.schedule(
   "0 0 * * *",
@@ -1486,4 +1485,4 @@ cron.schedule(
   }
 );
 
-module.exports = {usuarioRouter,verifyToken, obtenerFechaMexico};
+module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };
