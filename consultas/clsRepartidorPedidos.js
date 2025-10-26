@@ -884,11 +884,10 @@ routerRepartidorPedidos.post("/pedidos/asignar",
   }
 );
 
+
+//Checar movil
 //Enpoit para cancelar pedido
-routerRepartidorPedidos.put(
-  "/pedidos/:id",
-  verifyToken,
-  csrfProtection,
+routerRepartidorPedidos.put("/pedidos/:id",verifyToken, csrfProtection,
   async (req, res) => {
     const { id } = req.params;
     const { estadoActual } = req.body;
@@ -988,6 +987,126 @@ routerRepartidorPedidos.put(
       //   [id]
       // );
 
+      await connection.commit();
+
+      res.status(200).json({
+        success: true,
+        message: "Pedido cancelado exitosamente y productos devueltos al inventario.",
+        data: { id, estadoActual },
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error al cancelar el pedido:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno del servidor al cancelar el pedido.",
+        error: error.message,
+        code: error.code || "UNKNOWN",
+      });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
+//enpoit de cancelar movil
+routerRepartidorPedidos.put("/pedidos-movil/:id",verifyToken,
+  async (req, res) => {
+    const { id } = req.params;
+    const { estadoActual } = req.body;
+
+    console.log("Datos recibidos", id, estadoActual)
+    if (estadoActual !== "Cancelado") {
+      return res.status(400).json({
+        success: false,
+        message: "El estado debe ser 'Cancelado' para esta operación.",
+      });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Verificar si el pedido existe
+      const [existingPedido] = await connection.query(
+        `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?`,
+        [id]
+      );
+
+      if (existingPedido.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Pedido no encontrado.",
+        });
+      }
+
+      const pedido = existingPedido[0];
+      if (pedido.estadoActual === "Cancelado") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "El pedido ya está cancelado.",
+        });
+      }
+
+      // Obtener los detalles de los productos asociados al pedido, excluyendo los ya cancelados
+      const [pedidoDetalles] = await connection.query(
+        `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
+        [id]
+      );
+
+      // Actualizar el inventario para cada producto
+      for (const detalle of pedidoDetalles) {
+        const { idProductoColores, cantidad } = detalle;
+
+        // Verificar si el producto existe en el inventario
+        const [inventario] = await connection.query(
+          `SELECT stock, stockReal FROM tblinventario WHERE idProductoColor = ? AND estado = 'Activo'`,
+          [idProductoColores]
+        );
+
+        if (inventario.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({
+            success: false,
+            message: `Producto con idProductoColores ${idProductoColores} no encontrado en el inventario.`,
+          });
+        }
+
+        const { stock, stockReal } = inventario[0];
+
+        // Validar que el nuevo stock no exceda stockReal
+        const newStock = stock + cantidad;
+        if (newStock > stockReal) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `La devolución de ${cantidad} unidades para el producto con idProductoColores ${idProductoColores} excede el stock real (${stockReal}).`,
+          });
+        }
+
+        // Actualizar el stock (solo stock, no stockReservado)
+        await connection.query(
+          `UPDATE tblinventario SET stock = ? WHERE idProductoColor = ?`,
+          [newStock, idProductoColores]
+        );
+
+       
+     
+      }
+
+      // Actualizar el estado del pedido
+      const fechaModificacion = obtenerFechaMexico();
+      await connection.query(
+        `UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?`,
+        [estadoActual, fechaModificacion, id]
+      );
+
+    
       await connection.commit();
 
       res.status(200).json({
@@ -1304,7 +1423,7 @@ routerRepartidorPedidos.get('/repartidor/estadisticas',verifyToken, async (req, 
 });
 
 
-
+//Chacra para movil
 routerRepartidorPedidos.get('/repartidor/pedidos-hoy', verifyToken, async (req, res) => {
   try {
     const idUsuario = req.user?.id;
@@ -1556,6 +1675,8 @@ routerRepartidorPedidos.get("/repartidor/todos-pedidos", async (req, res) => {
 });
 
 
+
+//Checar enpoit para movil
 
 // GET: Detalles de un pedido por su ID
 routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => {

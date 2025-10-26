@@ -25,3 +25,10 @@
 =======
 {"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-03 10:49:06"}}
 >>>>>>> Stashed changes
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-06 00:29:52"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-06 00:29:52"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-08 22:32:12"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-13 16:57:31"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-13 16:58:32"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-13 17:00:07"}}
+{"level":"error","message":"Fallo al conectar a la base de datos","metadata":{"error":"read ECONNRESET","stack":"Error: read ECONNRESET\n    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)","timestamp":"2025-10-13 17:25:06"}}

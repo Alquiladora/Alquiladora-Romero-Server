@@ -357,6 +357,65 @@ routerPedidos.post("/pagos/registrar", csrfProtection, async (req, res) => {
 });
 
 
+//Forma Pago Movil
+routerPedidos.post("/pagos/registrar-movil", async (req, res) => {
+  try {
+    const { idPedido, monto, formaPago, metodoPago, detallesPago } = req.body;
+
+
+    if (!idPedido || !monto || !formaPago || !metodoPago) {
+      return res.status(400).json({
+        success: false,
+        message: "Faltan datos requeridos (idPedido, monto, formaPago, metodoPago)",
+      });
+    }
+
+    // Buscar un pago pendiente (monto NULL o 0) para ese pedido
+    const [pagosPendientes] = await pool.query(
+      `SELECT idPago FROM tblpagos WHERE idPedido = ? AND (monto IS NULL OR monto = 0) LIMIT 1`,
+      [idPedido]
+    );
+
+    if (pagosPendientes.length > 0) {
+      // Actualizar el primer pago pendiente
+      const idPago = pagosPendientes[0].idPago;
+
+      await pool.query(
+        `UPDATE tblpagos 
+         SET monto = ?, formaPago = ?, metodoPago = ?, detallesPago = ?, estadoPago = 'completado', fechaActualizacion = ? 
+         WHERE idPago = ?`,
+        [monto, formaPago, metodoPago, detallesPago, obtenerFechaMexico(), idPago]
+      );
+
+      return res.json({
+        success: true,
+        message: "Pago actualizado correctamente",
+      });
+    } else {
+      // Insertar nuevo pago (segundo o siguientes pagos)
+      await pool.query(
+        `INSERT INTO tblpagos 
+         (idPedido, monto, formaPago, metodoPago, detallesPago, estadoPago, fechaPago) 
+         VALUES (?, ?, ?, ?, ?, 'completado', ?)`,
+        [idPedido, monto, formaPago, metodoPago, detallesPago, obtenerFechaMexico()]
+      );
+
+      return res.json({
+        success: true,
+        message: "Nuevo pago registrado correctamente",
+      });
+    }
+  } catch (error) {
+    console.error("Error en registrar/actualizar pago:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error interno al registrar el pago",
+      error: error.message,
+    });
+  }
+});
+
+
 
 routerPedidos.get("/pedidos-manuales", csrfProtection, async (req, res) => {
   try {
@@ -1353,7 +1412,7 @@ WHERE p.idUsuarios = ?
 GROUP BY p.idPedido, nombreCliente 
 ORDER BY p.idPedido DESC
 
-      LIMIT ? OFFSET ? -- Aplicamos la paginación
+      LIMIT ? OFFSET ? 
       `,
       [idUsuario, limite, offset] 
     );
@@ -1382,8 +1441,69 @@ ORDER BY p.idPedido DESC
     if (connection) connection.release();
   }
 });
+//Pedido historial detalles 
 
+routerPedidos.get("/detalles-pedido/:idPedido", verifyToken, csrfProtection, async (req, res) => {
+  try {
+    const { idPedido } = req.params;
 
+    if (!idPedido || isNaN(idPedido)) {
+      return res.status(400).json({ error: "ID de pedido inválido" });
+    }
+
+    const [rows] = await pool.query("CALL sp_DetallesPedido(?)", [idPedido]);
+
+    const data = rows[0] || [];
+
+    if (data.length === 0) {
+      return res.status(404).json({ message: "Pedido no encontrado" });
+    }
+    const pedido = data[0];
+    let direccionEnvio = null;
+    let productos = [];
+
+    try {
+      direccionEnvio = pedido.direccionEnvio ? JSON.parse(pedido.direccionEnvio) : null;
+    } catch {
+      direccionEnvio = null;
+    }
+
+    try {
+      productos = pedido.productos ? JSON.parse(pedido.productos) : [];
+    } catch {
+      productos = [];
+    }
+    const pedidoFormateado = {
+      idPedido: pedido.idPedido,
+      idRastreo: pedido.idRastreo,
+      estado: pedido.estado,
+      fechaInicio: pedido.fechaInicio,
+      fechaEntrega: pedido.fechaEntrega,
+      horaAlquiler: pedido.horaAlquiler,
+      totalPagar: parseFloat(pedido.totalPagar),
+      detallesPago: pedido.detallesPago,
+      tipoPedido: pedido.tipoPedido,
+      nombreCliente: pedido.nombreCliente,
+      direccionEnvio, // objeto JSON parseado
+      totalPagado: parseFloat(pedido.totalPagado),
+      estadoPago: pedido.estadoPago,
+      productos,  // array JSON parseado
+    };
+
+      return res.status(200).json({
+      success: true,
+      pedido: pedidoFormateado,
+    });
+
+  } catch (error) {
+    console.error("Error al obtener los detalles del pedido:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+      error: error.message,
+    });
+  }
+});
 
 //Verificar si otro componente ocupa este enpoit 
 routerPedidos.get("/pedidos-cliente/:idUsuarios", csrfProtection, async (req, res) => {
@@ -1666,6 +1786,169 @@ routerPedidos.get("/historial/:idPedido", csrfProtection, async (req, res) => {
     });
   }
 });
+
+//Pedidos de calificado
+routerPedidos.post("/calificar",csrfProtection,verifyToken, async (req, res) => {
+  let connection;
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+        const { idPedido, calificacionEstrellas, comentarios, fotosUrls } = req.body;
+      
+        const idUsuarios = req.user?.id ;
+        console.log("idusarios de cookies de calificar", idPedido, calificacionEstrellas,)
+        
+       
+        if (!idPedido || !idUsuarios || !calificacionEstrellas) {
+            return res.status(400).json({
+                success: false,
+                message: "Datos de evaluación incompletos (idPedido, idUsuarios y calificacionEstrellas son requeridos).",
+            });
+        }
+        
+        const rating = parseInt(calificacionEstrellas);
+
+        if (rating < 1 || rating > 5) {
+            return res.status(400).json({
+                success: false,
+                message: "La calificación debe ser un valor entre 1 y 5.",
+            });
+        }
+        const [pedidoRows] = await connection.query(
+            `
+            SELECT estadoActual 
+            FROM tblpedidos 
+            WHERE idPedido = ? 
+            LIMIT 1
+            `,
+            [idPedido]
+        );
+
+        if (pedidoRows.length === 0) {
+            return res.status(404).json({ success: false, message: "Pedido no encontrado." });
+        }
+        
+        const estadoPedido = pedidoRows[0].estadoActual;
+      
+        if (estadoPedido !== 'Devuelto' && estadoPedido !== 'Finalizado') {
+            return res.status(403).json({ success: false, message: "El pedido aún no está en estado de evaluación (Devuelto o Finalizado)." });
+        }
+         let comentarioLimpio = comentarios ? comentarios.trim() : "";
+
+        const palabrasProhibidas = [
+            "puta", "pendejo", "idiota", "mierda", "imbécil",
+            "estúpido", "cabron", "ching", "culer", "tonto"
+        ];
+
+        const contienePalabrasOfensivas = palabrasProhibidas.some(palabra =>
+            comentarioLimpio.toLowerCase().includes(palabra)
+        );
+
+        if (contienePalabrasOfensivas) {
+            return res.status(400).json({
+                success: false,
+                message: "El comentario contiene lenguaje inapropiado. Por favor, usa un lenguaje respetuoso.",
+            });
+        }
+
+        if (comentarioLimpio && comentarioLimpio.length < 10) {
+            return res.status(400).json({
+                success: false,
+                message: "El comentario debe tener al menos 10 caracteres para ser válido.",
+            });
+        }
+
+        const finalFotosUrls = Array.isArray(fotosUrls) ? fotosUrls : [];
+        const fotosAdjuntasJSON = JSON.stringify(finalFotosUrls);
+
+
+        
+       const [result] = await connection.query(
+            `
+            INSERT INTO tblValorarPedido (idPedido, idUsuarios, calificacionEstrellas, comentarios, fotosAdjuntas)
+            VALUES (?, ?, ?, ?, ?)
+            `,
+            [idPedido, idUsuarios, rating, comentarios || null, fotosAdjuntasJSON]
+        );
+        const tieneFotos = finalFotosUrls.length > 0;
+        const puntosAGanar = tieneFotos ? 50 : 20;
+        const tipoMovimiento = tieneFotos ? "Calificación con foto" : "Calificación simple";
+        await connection.query(
+            `
+            INSERT INTO tblPuntos (idUsuario, tipoMovimiento, puntos, fechaMovimiento, idPedido)
+            VALUES (?, ?, ?, ?, ?)
+            `,
+            [idUsuarios, tipoMovimiento, puntosAGanar, new Date(), idPedido] 
+           
+        );
+        await connection.commit();
+
+       
+      res.status(201).json({
+            success: true,
+           
+            message: `¡Gracias! Tu evaluación ha sido registrada y has ganado ${puntosAGanar} puntos.`,
+            idValoracion: result.insertId,
+        });
+} catch (error) {
+        
+        if (connection) {
+            await connection.rollback();
+        }
+        
+        console.error("Error al calificar pedido y sumar puntos:", error); 
+        res.status(500).json({
+            success: false,
+            message: "Error interno al procesar la evaluación",
+            error: error.message,
+        });
+    } finally {
+    
+        if (connection) {
+            connection.release();
+        }
+    }
+});
+
+
+// 📦 Verificar qué pedidos ya fueron calificados por un usuario específico
+routerPedidos.get("/calificados", csrfProtection, verifyToken, async (req, res) => {
+  try {
+    const idUsuarios = req.user?.id;
+
+    if (!idUsuarios) {
+      return res.status(401).json({
+        success: false,
+        message: "Usuario no autenticado.",
+      });
+    }
+    const [rows] = await pool.query(
+      `
+      SELECT idPedido
+      FROM tblValorarPedido
+      WHERE idUsuarios = ?
+      `,
+      [idUsuarios]
+    );
+
+
+    const pedidosCalificados = rows.map((r) => r.idPedido);
+
+    res.status(200).json({
+      success: true,
+      pedidosCalificados,
+    });
+
+  } catch (error) {
+    console.error("Error al obtener pedidos calificados:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno al obtener pedidos calificados.",
+      error: error.message,
+    });
+  }
+});
+
 
 
 routerPedidos.get("/productos/seleccion", csrfProtection, async (req, res) => {

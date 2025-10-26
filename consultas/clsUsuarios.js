@@ -40,7 +40,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 //========================COOKIES================================================
-const isProd = process.env.NODE_ENV === "development";
+const isProd = process.env.NODE_ENV === "production";
 
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
@@ -187,6 +187,9 @@ usuarioRouter.post("/login", async (req, res, next) => {
   try {
     const { email, contrasena, tokenMFA, deviceType, captchaToken, ip } =
       req.body;
+
+    console.log("Datos recibidos de login ", email, contrasena, tokenMFA, deviceType, captchaToken, ip)
+
     const clientTimestamp = obtenerFechaMexico();
 
     if (!email || !contrasena) {
@@ -243,6 +246,157 @@ usuarioRouter.post("/login", async (req, res, next) => {
       await handleFailedAttempt(ip, usuario.idUsuarios, pool);
 
       return res.status(401).json({ message: "Credenciales Incorrectos" });
+    }
+
+    //==============================================================MFA ATIVADO=====================
+ 
+
+
+    if (usuario.multifaltor) {
+      if (!tokenMFA) {
+        return res.status(200).json({
+          message:
+            "MFA requerido. Por favor ingresa el código de verificación MFA.",
+          mfaRequired: true,
+          userId: usuario.idUsuarios,
+        });
+      }
+      // Si se recibió un tokenMFA, verificarlo
+      const isValidMFA = otplib.authenticator.check(
+        tokenMFA,
+        usuario.multifaltor
+      );
+
+      console.log("Datos a mostra de mfa para validar", isValidMFA);
+
+      if (!isValidMFA) {
+        return res.status(400).json({ message: "Código MFA incorrecto." });
+      }
+    }
+
+    // Generar token JWT
+    const token = jwt.sign(
+      { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol },
+      SECRET_KEY,
+      { expiresIn: "24h" }
+    );
+
+    // Crear la cookie de sesión
+    res.cookie("sesionToken", token, {
+      httpOnly: true,
+      secure:isProd ,
+      sameSite: "None",
+      maxAge: TOKEN_EXPIRATION_TIME,
+    });
+
+    // Insertar la sesión en tblsesiones
+    try {
+      await pool.query(`
+      INSERT INTO tblsesiones 
+        (idUsuarios, tokenSesion, horaInicio, direccionIP, tipoDispositivo, cookie)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+        [usuario.idUsuarios, cookiesId, clientTimestamp, ip, deviceType, token]);
+    
+    } catch (insertError) {
+      console.error("Error al insertar la sesión en tblsesiones:", insertError);
+      next(error);
+    }
+
+    if (usuario && usuario.idUsuarios) {
+      const userSocket = userSockets[usuario.idUsuarios];
+      if (userSocket) {
+        userSocket.emit("usuarioAutenticado", {
+          idUsuarios: usuario.idUsuarios,
+        });
+      } else {
+        console.log(
+          `⚠️ Usuario ${usuario.idUsuarios} no tiene un socket activo.`
+        );
+      }
+    } else {
+      console.log("El objeto usuario no tiene la propiedad idUsuarios");
+    }
+
+    // Responder con éxito
+    res.json({
+      message: "Login exitoso",
+      token: token, 
+      user: {
+        idUsuarios: usuario.idUsuarios,
+        nombre: usuario.nombre,
+        rol: usuario.rol,
+      },
+    });
+
+    console.log("Login exitoso");
+  } catch (insertError) {
+  next(insertError); 
+}
+});
+
+//LOGIN PARA MOVIL ---------------------------------
+usuarioRouter.post("/login-movil", async (req, res, next) => {
+  try {
+    const { email, contrasena, tokenMFA, deviceType, ip } =
+      req.body;
+
+    console.log("Datos recibidos de login ", email, contrasena, tokenMFA, deviceType, ip)
+    
+    const clientTimestamp = obtenerFechaMexico();
+
+    if (!email || !contrasena) {
+      return res
+        .status(400)
+        .json({ message: "Email y contraseña son obligatorios." });
+    }
+ 
+    if (!ip || !deviceType) {
+      return res
+        .status(400)
+        .json({ message: "IP y tipo de dispositivo son obligatorios." });
+    }
+    const cookiesId = uuidv4();
+
+    if (!pool) {
+      throw new Error("La conexión a la base de datos no está disponible.");
+    }
+
+    const [result] = await pool.query(
+      "SELECT * FROM tblusuarios WHERE correo = ?",
+      [email]
+    );
+    console.log("Datos de login movil", result)
+
+    if (!Array.isArray(result) || result.length === 0) {
+      console.log("Datos Invalidos");
+      return res.status(401).json({ message: "Datos Invalidos" });
+    }
+
+    const usuario = result[0];
+
+    //===================================================================================================
+
+    // ==== BLOQUEO ====
+    // Si verificarBloqueo envía res, salimos
+    if (await VerificarBloqueo(usuario, res)) {
+      return;
+    }
+    //================================================================================
+    // Comparar la contraseña con la base de datos
+    const validPassword = await argon2.verify(usuario.password, contrasena);
+
+    if (!validPassword) {
+      await handleFailedAttempt(ip, usuario.idUsuarios, pool);
+
+      return res.status(401).json({ message: "Credenciales Incorrectos" });
+    }
+
+    
+    //Validamos el rol
+    if(usuario.rol !== 'repartidor'){
+       return res.status(403).json({ message: "Acceso denegado. Solo los repartidores pueden usar esta aplicación." });
+
     }
     //==============================================================MFA ATIVADO=====================
  
@@ -316,6 +470,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     // Responder con éxito
     res.json({
       message: "Login exitoso",
+      token: token, 
       user: {
         idUsuarios: usuario.idUsuarios,
         nombre: usuario.nombre,
@@ -328,6 +483,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
   next(insertError); 
 }
 });
+
 
 
 //=============================FUNCION DE BLOQUEO
@@ -463,7 +619,15 @@ async function handleFailedAttempt(ip, idUsuarios, pool) {
 //Middleware para validar token
 const verifyToken = async (req, res, next) => {
   try {
-    const token = req.cookies?.sesionToken;
+    let token;
+
+     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+
+    else if (req.cookies?.sesionToken) {
+      token = req.cookies.sesionToken;
+    }
 
     if (!token) {
       return res.status(403).json({ message: "Token no proporcionado. Acceso denegado." });
@@ -509,6 +673,7 @@ const verifyToken = async (req, res, next) => {
 // Ruta protegida
 usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
   const userId = req.user.id;
+
   try {
     const query = `
     SELECT 
@@ -572,6 +737,8 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
 //Perfil inicio
 usuarioRouter.get("/perfil-simple", verifyToken, async (req, res) => {
   const userId = req.user.id;
+  console.log("Datos recibidos", userId)
+
   try {
     const query = `
       SELECT nombre, fotoPerfil
@@ -1484,5 +1651,48 @@ cron.schedule(
     timezone: "America/Mexico_City",
   }
 );
+
+
+
+
+
+
+
+
+//-------------------------------------------------------MOVIL------------------------------------------------------------------------------------------------
+usuarioRouter.get("/movil-home", verifyToken, async (req, res) => {
+  const userId = req.user.id; // idUsuarios del token JWT
+
+  console.log("🔹 ID de usuario autenticado:", userId);
+
+  try {
+    const [rows] = await pool.query("CALL sp_consulta_repartidor_home(?)", [
+      userId,
+    ]);
+    const data = rows[0] || [];
+
+    if (data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No se encontraron datos de desempeño para este repartidor.",
+      });
+    }
+
+   
+    res.json({
+      success: true,
+      message: "Datos del repartidor obtenidos correctamente.",
+      data: data[0],
+    });
+  } catch (error) {
+    console.error("❌ Error en /repartidor/home:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener los datos del repartidor.",
+    });
+  }
+});
+
+
 
 module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };

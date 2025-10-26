@@ -54,7 +54,8 @@ const allowedOrigins = [
   'http://localhost:3001',
   'https://alquiladora-romero-server.onrender.com',
   'http://localhost:3000',
-  'https://alquiladoraromero.bina5.com'
+  'https://alquiladoraromero.bina5.com',
+  'https://epiclike-epicyclic-jennifer.ngrok-free.dev' ,
 ];
 
 app.use(cors({
@@ -106,10 +107,11 @@ const server = http.createServer(app);
 const startServer = async () => {
   try {
     await connect.connect();
+    connect.startKeepAlive();
     logger.info('Conexión a la base de datos establecida', { 
       db: process.env.DB_NAME || 'unknown' 
     });
-    server.listen(port, () => {
+    server.listen(port, '0.0.0.0', () => {
      
       const io = initSocket(server);
       logger.info('WebSocket inicializado');
