@@ -107,14 +107,16 @@ async function getEntregaReal(fechaInicio, fechaRegistro) {
   return null; // Casos no válidos
 }
 
+
+
 routerRepartidorPedidos.get("/pedidos", async (req, res) => {
   try {
     const today = todayMx();
-
     const fechaMinimaEntrega = moment(today).subtract(14, "days").format("YYYY-MM-DD");
     const fechaMaximaEntrega = moment(today).add(8, "days").format("YYYY-MM-DD");
-    const fechaEntregaRecogidaLimite = moment(today).format("YYYY-MM-DD"); 
+    const fechaEntregaRecogidaLimite = moment(today).format("YYYY-MM-DD");
 
+    // 🚀 Subconsulta para pagos en vez de GROUP BY
     const [rows] = await pool.query(
       `
       SELECT
@@ -124,8 +126,8 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         p.idRastreo,
         p.estadoActual,
         p.totalPagar,
-        COALESCE(SUM(pg.monto), 0) AS totalPagado,
-        (COALESCE(SUM(pg.monto), 0) >= p.totalPagar) AS isFullyPaid,
+        COALESCE(pg.totalPagado, 0) AS totalPagado,
+        (COALESCE(pg.totalPagado, 0) >= p.totalPagar) AS isFullyPaid,
         p.fechaInicio,
         p.fechaEntrega,
         p.horaAlquiler,
@@ -141,12 +143,16 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         d.direccion,
         d.referencias
       FROM tblpedidos p
-      LEFT JOIN tblpagos pg ON p.idPedido = pg.idPedido
+      LEFT JOIN (
+        SELECT idPedido, SUM(monto) AS totalPagado
+        FROM tblpagos
+        GROUP BY idPedido
+      ) pg ON p.idPedido = pg.idPedido
       INNER JOIN tbldireccioncliente d ON p.idDireccion = d.idDireccion
       LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
       WHERE (
         (
-          LOWER(p.estadoActual) IN ('confirmado')
+          LOWER(p.estadoActual) = 'confirmado'
           AND p.fechaInicio >= ?
           AND p.fechaInicio < ?
         )
@@ -158,11 +164,11 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
           )
         )
       )
-      GROUP BY p.idPedido
       `,
       [fechaMinimaEntrega, fechaMaximaEntrega, fechaEntregaRecogidaLimite]
     );
 
+    // 🚀 Procesamiento en Node
     const deliveries = [];
     const lateDeliveries = [];
     const pickups = [];
@@ -179,8 +185,10 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         moment.tz(r.fechaRegistro, "America/Mexico_City").isSame(today, "day") &&
         moment.tz(r.fechaInicio, "America/Mexico_City").isSame(today, "day");
 
-      if (r.estadoActual.toLowerCase() === "confirmado" || r.estadoActual.toLowerCase() === "enviando") {
-        const esAtrasado = moment(r.fechaInicio).isBefore(today, "day") || (entregaReal && entregaReal.isBefore(today, "day"));
+      if (["confirmado", "enviando"].includes(r.estadoActual.toLowerCase())) {
+        const esAtrasado =
+          moment(r.fechaInicio).isBefore(today, "day") ||
+          (entregaReal && entregaReal.isBefore(today, "day"));
 
         const entregaObj = {
           ...r,
@@ -200,7 +208,6 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
           deliveries.push(entregaObj);
           if (dayOfWeek !== 0) daysSet.add(entregaRealStr);
         }
-        continue;
       }
 
       if (r.estadoActual.toLowerCase() === "en alquiler") {
@@ -230,50 +237,45 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
     });
 
     const totalsByLocation = {};
+    const todos = [...deliveries, ...lateDeliveries, ...pickups];
 
-  const todos = [...deliveries, ...lateDeliveries, ...pickups];
+    for (const r of todos) {
+      const key = `${r.direccionEstado}||${r.municipio}||${r.localidad}`;
+      if (!totalsByLocation[key]) {
+        totalsByLocation[key] = {
+          estado: r.direccionEstado,
+          municipio: r.municipio,
+          localidad: r.localidad,
+          count: 0,
+        };
+      }
+      totalsByLocation[key].count++;
+    }
 
-todos.forEach((r) => {
-  const key = `${r.direccionEstado}||${r.municipio}||${r.localidad}`;
-  if (!totalsByLocation[key]) {
-    totalsByLocation[key] = {
-      estado: r.direccionEstado,
-      municipio: r.municipio,
-      localidad: r.localidad,
-      count: 0,
-    };
-  }
-  totalsByLocation[key].count++;
-});
-
-
-    const [[{ totalPedidosHoy }]] = await pool.query(
+    // 🚀 Unificar conteos en una sola consulta
+    const [[stats]] = await pool.query(
       `
-      SELECT COUNT(*) AS totalPedidosHoy
-      FROM tblpedidos p
-      LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
-      WHERE (
+      SELECT
+        (SELECT COUNT(*) FROM tblpedidos) AS totalPedidos,
+        (SELECT COUNT(*) FROM tblrepartidores) AS totalRepartidores,
+        (SELECT COUNT(*) FROM tblasignacionpedidos) AS totalPedidosAsignados,
         (
-          LOWER(p.estadoActual) IN ('confirmado', 'enviando')
-          AND DATE(CONVERT_TZ(p.fechaInicio, '+00:00', '-06:00')) = ?
-        )
-        OR (
-          LOWER(p.estadoActual) = 'en alquiler'
-          AND DATE(CONVERT_TZ(p.fechaEntrega, '+00:00', '-06:00')) = ?
-        )
-      )
+          SELECT COUNT(*) 
+          FROM tblpedidos p
+          LEFT JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
+          WHERE (
+            (
+              LOWER(p.estadoActual) IN ('confirmado', 'enviando')
+              AND DATE(CONVERT_TZ(p.fechaInicio, '+00:00', '-06:00')) = ?
+            )
+            OR (
+              LOWER(p.estadoActual) = 'en alquiler'
+              AND DATE(CONVERT_TZ(p.fechaEntrega, '+00:00', '-06:00')) = ?
+            )
+          )
+        ) AS totalPedidosHoy
       `,
       [today.format("YYYY-MM-DD"), moment(today).subtract(1, "day").format("YYYY-MM-DD")]
-    );
-
-    const [[{ totalPedidos }]] = await pool.query(
-      "SELECT COUNT(*) AS totalPedidos FROM tblpedidos"
-    );
-    const [[{ totalRepartidores }]] = await pool.query(
-      "SELECT COUNT(*) AS totalRepartidores FROM tblrepartidores"
-    );
-    const [[{ totalPedidosAsignados }]] = await pool.query(
-      "SELECT COUNT(*) AS totalPedidosAsignados FROM tblasignacionpedidos"
     );
 
     return res.json({
@@ -283,10 +285,7 @@ todos.forEach((r) => {
       lateDeliveries,
       pickups,
       totalsByLocation: Object.values(totalsByLocation),
-      totalPedidos,
-      totalRepartidores,
-      totalPedidosAsignados,
-      totalPedidosHoy,
+      ...stats,
     });
   } catch (err) {
     console.error("Error al obtener pedidos:", err);
@@ -885,11 +884,10 @@ routerRepartidorPedidos.post("/pedidos/asignar",
   }
 );
 
+
+//Checar movil
 //Enpoit para cancelar pedido
-routerRepartidorPedidos.put(
-  "/pedidos/:id",
-  verifyToken,
-  csrfProtection,
+routerRepartidorPedidos.put("/pedidos/:id",verifyToken, csrfProtection,
   async (req, res) => {
     const { id } = req.params;
     const { estadoActual } = req.body;
@@ -989,6 +987,126 @@ routerRepartidorPedidos.put(
       //   [id]
       // );
 
+      await connection.commit();
+
+      res.status(200).json({
+        success: true,
+        message: "Pedido cancelado exitosamente y productos devueltos al inventario.",
+        data: { id, estadoActual },
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error al cancelar el pedido:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno del servidor al cancelar el pedido.",
+        error: error.message,
+        code: error.code || "UNKNOWN",
+      });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
+//enpoit de cancelar movil
+routerRepartidorPedidos.put("/pedidos-movil/:id",verifyToken,
+  async (req, res) => {
+    const { id } = req.params;
+    const { estadoActual } = req.body;
+
+    console.log("Datos recibidos", id, estadoActual)
+    if (estadoActual !== "Cancelado") {
+      return res.status(400).json({
+        success: false,
+        message: "El estado debe ser 'Cancelado' para esta operación.",
+      });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Verificar si el pedido existe
+      const [existingPedido] = await connection.query(
+        `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?`,
+        [id]
+      );
+
+      if (existingPedido.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Pedido no encontrado.",
+        });
+      }
+
+      const pedido = existingPedido[0];
+      if (pedido.estadoActual === "Cancelado") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "El pedido ya está cancelado.",
+        });
+      }
+
+      // Obtener los detalles de los productos asociados al pedido, excluyendo los ya cancelados
+      const [pedidoDetalles] = await connection.query(
+        `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
+        [id]
+      );
+
+      // Actualizar el inventario para cada producto
+      for (const detalle of pedidoDetalles) {
+        const { idProductoColores, cantidad } = detalle;
+
+        // Verificar si el producto existe en el inventario
+        const [inventario] = await connection.query(
+          `SELECT stock, stockReal FROM tblinventario WHERE idProductoColor = ? AND estado = 'Activo'`,
+          [idProductoColores]
+        );
+
+        if (inventario.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({
+            success: false,
+            message: `Producto con idProductoColores ${idProductoColores} no encontrado en el inventario.`,
+          });
+        }
+
+        const { stock, stockReal } = inventario[0];
+
+        // Validar que el nuevo stock no exceda stockReal
+        const newStock = stock + cantidad;
+        if (newStock > stockReal) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `La devolución de ${cantidad} unidades para el producto con idProductoColores ${idProductoColores} excede el stock real (${stockReal}).`,
+          });
+        }
+
+        // Actualizar el stock (solo stock, no stockReservado)
+        await connection.query(
+          `UPDATE tblinventario SET stock = ? WHERE idProductoColor = ?`,
+          [newStock, idProductoColores]
+        );
+
+       
+     
+      }
+
+      // Actualizar el estado del pedido
+      const fechaModificacion = obtenerFechaMexico();
+      await connection.query(
+        `UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?`,
+        [estadoActual, fechaModificacion, id]
+      );
+
+    
       await connection.commit();
 
       res.status(200).json({
@@ -1187,8 +1305,8 @@ routerRepartidorPedidos.get("/repartidores/historial/:idPedido/detalles",  async
 
 routerRepartidorPedidos.get("/repartidor/datos", verifyToken, csrfProtection, async (req, res) => {
   try {
-    const idUsuario = req.user?.id ; // ID del usuario autenticado desde el token JWT
-    console.log("Id de datos repartidor:", idUsuario);
+    const idUsuario = req.user?.id ;
+   
 
     if (!idUsuario) {
       return res.status(401).json({ error: "ID de usuario no encontrado en el token" });
@@ -1305,7 +1423,7 @@ routerRepartidorPedidos.get('/repartidor/estadisticas',verifyToken, async (req, 
 });
 
 
-
+//Chacra para movil
 routerRepartidorPedidos.get('/repartidor/pedidos-hoy', verifyToken, async (req, res) => {
   try {
     const idUsuario = req.user?.id;
@@ -1557,6 +1675,8 @@ routerRepartidorPedidos.get("/repartidor/todos-pedidos", async (req, res) => {
 });
 
 
+
+//Checar enpoit para movil
 
 // GET: Detalles de un pedido por su ID
 routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => {

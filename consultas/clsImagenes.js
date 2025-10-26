@@ -44,6 +44,46 @@ imagenesRouter.post('/upload',  upload.single('imagen'), (req, res) => {
   }
 });
 
+//-------------------------------EVALUAR PEDIDO---------------
+imagenesRouter.post('/calificar-pedido', upload.array('imagenes', 3), async (req, res) => {
+  
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).send("No se ha subido ningún archivo.");
+  }
+  if (req.files.length > 6) {
+    console.log("Error a recibir Máximo de 3 imágenes permitidas")
+    return res.status(400).json({ message: "Máximo de 3 imágenes permitidas." });
+  }
+
+  try {
+
+    const uploadPromises = req.files.map((file) => {
+      return new Promise((resolve, reject) => {
+        const cld_upload_stream = cloudinary.uploader.upload_stream(
+          { folder: 'imagenes/CalificacionPedidos' },
+          (error, result) => {
+            if (error) {
+              reject(error);
+            } else {
+           
+              resolve(result.secure_url);
+            }
+          }
+        );
+        streamifier.createReadStream(file.buffer).pipe(cld_upload_stream);
+      });
+    });
+    const urls = await Promise.all(uploadPromises);
+    console.log("rESULTADO DE URLS", urls)
+    res.json({ urls });
+  } catch (error) {
+    console.error("Error al subir las imágenes:", error);
+    res.status(500).json({ message: "Error al subir las imágenes." });
+  }
+});
+
+
+
 //==============================PRODUCTOS===============================================//
 imagenesRouter.post('/upload-multiple', upload.array('imagenes', 6), async (req, res) => {
   
@@ -81,6 +121,7 @@ imagenesRouter.post('/upload-multiple', upload.array('imagenes', 6), async (req,
     res.status(500).json({ message: "Error al subir las imágenes." });
   }
 });
+
 
 
 
