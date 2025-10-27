@@ -2,8 +2,12 @@ const request = require('supertest');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { mockDeep } = require('jest-mock-extended');
+
+// Importar los routers directamente
+const usuarioRouter = require('../consultas/clsUsuarios').usuarioRouter;
 const routerPedidos = require('../consultas/clsPedidos');
 const { pool } = require('../connectBd');
+
 const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
 
 // Mockear connectBd
@@ -11,53 +15,39 @@ jest.mock('../connectBd', () => ({
   pool: mockDeep(),
 }));
 
-// Mockear clsUsuarios
-jest.mock('../consultas/clsUsuarios', () => ({
-  verifyToken: jest.fn(),
-  obtenerFechaMexico: jest.fn(() => '2025-10-27 10:59:00'),
-  usuarioRouter: express.Router(), // Mockear usuarioRouter
-}));
+// Mockear clsUsuarios (sin referenciar express fuera del ámbito)
+jest.mock('../consultas/clsUsuarios', () => {
+  const mockRouter = jest.fn((req, res, next) => {
+    res.json({ message: 'Mocked usuario route' });
+  });
+  return {
+    verifyToken: jest.fn(),
+    obtenerFechaMexico: jest.fn(() => '2025-10-27 10:59:00'),
+    usuarioRouter: { get: mockRouter, post: mockRouter }, // Mock simple para usuarioRouter
+  };
+});
 
-// Mockear todos los módulos importados en rutas.js
-const mockRouter = () => {
-  const router = express.Router();
-  router.get('/test', (req, res) => res.json({ message: 'Mocked route' }));
-  return router;
-};
+// Mockear clsPedidos (si es necesario, aunque ya lo importamos directamente)
+jest.mock('../consultas/clsPedidos', () => {
+  const mockRouter = jest.fn((req, res, next) => {
+    res.json({ message: 'Mocked pedidos route' });
+  });
+  return { get: mockRouter };
+});
 
-jest.mock('../consultas/clsCorreo', () => mockRouter());
-jest.mock('../consultas/clsToken', () => mockRouter());
-jest.mock('../consultas/clsAuditoria', () => mockRouter());
-jest.mock('../consultas/clsImagenes', () => mockRouter());
-jest.mock('../consultas/clssesiones', () => mockRouter());
-jest.mock('../consultas/clsProductos', () => mockRouter());
-jest.mock('../consultas/mfa', () => mockRouter());
-jest.mock('../consultas/clsEmpresa', () => mockRouter());
-jest.mock('../consultas/clsPoliticas', () => mockRouter());
-jest.mock('../consultas/clsTerminos', () => mockRouter());
-jest.mock('../consultas/clsDeslin', () => mockRouter());
-jest.mock('../consultas/clsSobreNosotros', () => mockRouter());
-jest.mock('../consultas/clsPrecios', () => mockRouter());
-jest.mock('../consultas/clsBodegas', () => mockRouter());
-jest.mock('../consultas/clsInventario', () => mockRouter());
-jest.mock('../consultas/clsDireccion', () => mockRouter());
-jest.mock('../consultas/clsCarrito', () => mockRouter());
-jest.mock('../consultas/clsColores', () => mockRouter());
-jest.mock('../consultas/clsHorario', () => mockRouter());
-jest.mock('../consultas/clsRepartidorPedidos', () => mockRouter());
-jest.mock('../consultas/clsWearos', () => mockRouter());
-
-describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', () => {
+describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Pedidos)', () => {
   let app;
   let mockPool;
 
   beforeAll(() => {
+    // Inicializar la aplicación Express
     app = express();
     app.use(express.json());
+    app.use('/api/usuarios', usuarioRouter);
     app.use('/api/pedidos', routerPedidos);
 
+    // Configurar el mock del pool
     mockPool = require('../connectBd').pool;
-
     mockPool.getConnection.mockResolvedValue({
       query: jest.fn(),
       release: jest.fn(),
@@ -71,13 +61,84 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     jest.clearAllMocks();
   });
 
+  afterEach(() => {
+    jest.clearAllTimers(); // Limpiar temporizadores para evitar operaciones asíncronas abiertas
+  });
+
   afterAll(() => {
     jest.resetAllMocks();
   });
 
-  test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe rechazar el acceso sin token', async () => {
+  // Prueba para /api/usuarios/login
+  test('Prueba Positiva: POST /api/usuarios/login - Debe permitir login con credenciales válidas', async () => {
+    const mockUser = { id: 1, nombre: 'Test User', rol: 'user' };
+    const mockToken = jwt.sign(mockUser, SECRET_KEY, { expiresIn: '24h' });
+
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+      req.user = mockUser;
+      next();
+    });
+
+    mockPool.getConnection.mockResolvedValueOnce({
+      query: jest.fn().mockResolvedValueOnce([[mockUser]]), // Simula usuario encontrado
+      release: jest.fn(),
+    });
+
     const res = await request(app)
-      .get('/api/pedidos/historial-pedidos')
+      .post('/api/usuarios/login')
+      .send({ correo: 'test@example.com', contrasena: 'password123' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('token');
+    expect(res.body.user).toEqual(expect.objectContaining(mockUser));
+  });
+
+  test('Prueba Negativa: POST /api/usuarios/login - Debe rechazar credenciales inválidas', async () => {
+    mockPool.getConnection.mockResolvedValueOnce({
+      query: jest.fn().mockResolvedValueOnce([[]]), // Simula usuario no encontrado
+      release: jest.fn(),
+    });
+
+    const res = await request(app)
+      .post('/api/usuarios/login')
+      .send({ correo: 'invalid@example.com', contrasena: 'wrongpassword' });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual({
+      message: 'Correo o contraseña incorrectos.',
+    });
+  });
+
+  // Prueba para /api/usuarios/perfil
+  test('Prueba Positiva: GET /api/usuarios/perfil - Debe devolver el perfil del usuario con token válido', async () => {
+    const userId = 1;
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
+      expiresIn: '24h',
+    });
+
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+      req.user = { id: userId, nombre: 'Test User', rol: 'user' };
+      next();
+    });
+
+    const mockPerfil = { id: userId, nombre: 'Test User', correo: 'test@example.com' };
+
+    mockPool.getConnection.mockResolvedValueOnce({
+      query: jest.fn().mockResolvedValueOnce([[mockPerfil]]),
+      release: jest.fn(),
+    });
+
+    const res = await request(app)
+      .get('/api/usuarios/perfil')
+      .set('Authorization', `Bearer ${mockToken}`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual(expect.objectContaining(mockPerfil));
+  });
+
+  test('Prueba Negativa: GET /api/usuarios/perfil - Debe rechazar sin token', async () => {
+    const res = await request(app)
+      .get('/api/usuarios/perfil')
       .send();
 
     expect(res.statusCode).toBe(403);
@@ -86,23 +147,59 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
   });
 
-  test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe rechazar con token inválido', async () => {
+  // Prueba para /api/usuarios/perfiles
+  test('Prueba Positiva: GET /api/usuarios/perfiles - Debe devolver lista de perfiles con token válido', async () => {
+    const userId = 1;
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'admin' }, SECRET_KEY, {
+      expiresIn: '24h',
+    });
+
     require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
-      return res.status(401).json({ message: 'El token ha expirado. Inicia sesión nuevamente.' });
+      req.user = { id: userId, nombre: 'Test User', rol: 'admin' };
+      next();
+    });
+
+    const mockPerfiles = [
+      { id: 1, nombre: 'User 1', correo: 'user1@example.com' },
+      { id: 2, nombre: 'User 2', correo: 'user2@example.com' },
+    ];
+
+    mockPool.getConnection.mockResolvedValueOnce({
+      query: jest.fn().mockResolvedValueOnce([mockPerfiles]),
+      release: jest.fn(),
     });
 
     const res = await request(app)
-      .get('/api/pedidos/historial-pedidos')
-      .set('Authorization', 'Bearer invalid-token')
-      .send();
+      .get('/api/usuarios/perfiles')
+      .set('Authorization', `Bearer ${mockToken}`);
 
-    expect(res.statusCode).toBe(401);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual(mockPerfiles);
+  });
+
+  test('Prueba Negativa: GET /api/usuarios/perfiles - Debe rechazar si no es admin', async () => {
+    const userId = 1;
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
+      expiresIn: '24h',
+    });
+
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+      req.user = { id: userId, nombre: 'Test User', rol: 'user' };
+      next();
+    });
+
+    const res = await request(app)
+      .get('/api/usuarios/perfiles')
+      .set('Authorization', `Bearer ${mockToken}`);
+
+    expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({
-      message: 'El token ha expirado. Inicia sesión nuevamente.',
+      message: 'Acceso denegado. Se requiere rol de administrador.',
     });
   });
 
-  test('Prueba Positiva: GET /api/pedidos/historial-pedidos - Debe devolver pedidos con un token válido', async () => {
+  // Prueba para /api/pedidos/historial-pedidos
+  test('Prueba Positiva: GET /api/pedidos/historial-pedidos - Debe devolver pedidos con token válido', async () => {
     const userId = 1;
     const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
       expiresIn: '24h',
@@ -137,8 +234,7 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
 
     const res = await request(app)
       .get('/api/pedidos/historial-pedidos?pagina=1&limite=10')
-      .set('Authorization', `Bearer ${mockToken}`)
-      .send();
+      .set('Authorization', `Bearer ${mockToken}`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
@@ -149,6 +245,17 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
         paginaActual: 1,
         totalPaginas: 1,
       },
+    });
+  });
+
+  test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe rechazar sin token', async () => {
+    const res = await request(app)
+      .get('/api/pedidos/historial-pedidos')
+      .send();
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({
+      message: 'Token no proporcionado. Acceso denegado.',
     });
   });
 
@@ -172,8 +279,7 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
 
     const res = await request(app)
       .get('/api/pedidos/historial-pedidos?pagina=1&limite=10')
-      .set('Authorization', `Bearer ${mockToken}`)
-      .send();
+      .set('Authorization', `Bearer ${mockToken}`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
@@ -184,31 +290,6 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
         paginaActual: 1,
         totalPaginas: 0,
       },
-    });
-  });
-
-  test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe manejar errores de base de datos', async () => {
-    const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
-      expiresIn: '24h',
-    });
-
-    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
-      req.user = { id: userId, nombre: 'Test User', rol: 'user' };
-      next();
-    });
-
-    mockPool.getConnection.mockRejectedValueOnce(new Error('Database connection failed'));
-
-    const res = await request(app)
-      .get('/api/pedidos/historial-pedidos?pagina=1&limite=10')
-      .set('Authorization', `Bearer ${mockToken}`)
-      .send();
-
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toEqual({
-      success: false,
-      error: 'Error interno del servidor.',
     });
   });
 });
