@@ -4,7 +4,8 @@
   "description": "Servidor del alquiladora romero",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "start": "node index.js"
   },
   "author": "edilberto",
   "license": "ISC",
@@ -38,5 +39,10 @@
     "streamifier": "^0.1.1",
     "stripe": "^18.3.0",
     "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "jest-mock-extended": "^4.0.0",
+    "supertest": "^7.1.4"
   }
 }
