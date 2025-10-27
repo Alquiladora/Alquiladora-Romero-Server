@@ -19,6 +19,8 @@ const axios = require("axios");
 const router = require("../rutas");
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 const { verifyToken } = require("./clsUsuarios");
+const { verificarYAsignarLogros } =  require('../config/logicaLogros');
+const { determinarNivel } = require('../config/logicaNiveles');
 
 const routerPedidos = express.Router();
 routerPedidos.use(express.json());
@@ -1292,72 +1294,166 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
 routerPedidos.put("/pedidos/actualizar-estado", csrfProtection, async (req, res) => {
   const { idPedido, newStatus, productUpdates } = req.body;
 
-  // Iniciar una transacción para garantizar consistencia en la base de datos
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
 
-    // 1. Actualizar estado del pedido en tblpedidos
-    await connection.query(
-      `UPDATE tblpedidos SET estadoActual = ? WHERE idPedido = ?`,
-      [newStatus, idPedido]
-    );
-
-    // 2. Actualizar estado de los productos si vienen actualizaciones
-    if (Array.isArray(productUpdates) && productUpdates.length > 0) {
-      for (const { idProductoColores, estadoProducto } of productUpdates) {
-        await connection.query(
-          `UPDATE tblpedidodetalles SET estadoProducto = ?, observaciones = NULL WHERE idPedido = ? AND idProductoColores = ?`,
-          [estadoProducto, idPedido, idProductoColores]
-        );
-      }
+    if (!idPedido || !newStatus) {
+        return res.status(400).json({ success: false, message: "Faltan idPedido o newStatus." });
+    }
+  
+const ESTADOS_PERMITIDOS_DESDE_DEVUELTO = ['Finalizado']; 
+    if (!ESTADOS_PERMITIDOS_DESDE_DEVUELTO.includes(newStatus)) {
+        return res.status(400).json({ success: false, message: `Estado '${newStatus}' no permitido para esta acción.` });
     }
 
-    // 3. Si el estado del pedido es "Finalizado" o "Cancelado", actualizar el inventario
-    if (newStatus === "Finalizado" || newStatus === "Cancelado") {
-      // Obtener los productos asociados al pedido desde tblpedidodetalles
-      const [productos] = await connection.query(
-        `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
-        [idPedido]
-      );
+  // Iniciar una transacción para garantizar consistencia en la base de datos
+  let connection;
+  try {
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
 
-      // Para cada producto, sumar la cantidad al stock en tblinventario
-      for (const producto of productos) {
-        const { idProductoColores, cantidad } = producto;
-
-        // Verificar si el producto existe en tblinventario
-        const [inventario] = await connection.query(
-          `SELECT stock FROM tblinventario WHERE idProductoColor = ?`,
-          [idProductoColores]
+       
+        const [pedidoRows] = await connection.query(
+            `SELECT idUsuarios, totalPagar, estadoActual 
+             FROM tblpedidos 
+             WHERE idPedido = ? FOR UPDATE`, 
+            [idPedido]
         );
 
-        if (inventario.length === 0) {
-          // Si el producto no existe en el inventario, lanzar un error o manejar según tu lógica
-          throw new Error(`Producto con idProductoColor ${idProductoColores} no encontrado en el inventario`);
+        if (pedidoRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ success: false, message: "Pedido no encontrado." });
+        }
+        
+        const pedido = pedidoRows[0];
+        const idUsuario = pedido.idUsuarios; 
+        const totalPagar = pedido.totalPagar; 
+        const estadoAnterior = pedido.estadoActual;
+
+    
+        if (estadoAnterior !== 'Devuelto' && newStatus === 'Finalizado') {
+            await connection.rollback();
+             return res.status(400).json({ success: false, message: `No se puede cambiar el estado de '${estadoAnterior}' a 'Finalizado'. Debe estar 'Devuelto'.` });
         }
 
-        // Actualizar el stock sumando la cantidad
+     
+        const fechaActualizacion = obtenerFechaMexico(); 
         await connection.query(
-          `UPDATE tblinventario SET stock = stock + ? WHERE idProductoColor = ?`,
-          [cantidad, idProductoColores]
+            `UPDATE tblpedidos 
+             SET estadoActual = ?, fechaA = ? 
+             WHERE idPedido = ?`,
+            [newStatus, fechaActualizacion, idPedido] 
         );
-      }
+
+
+        if (Array.isArray(productUpdates) && productUpdates.length > 0) {
+            for (const { idProductoColores, estadoProducto } of productUpdates) {
+              
+                await connection.query(
+                    `UPDATE tblpedidodetalles SET estadoProducto = ?, observaciones = NULL 
+                     WHERE idPedido = ? AND idProductoColores = ?`,
+                    [estadoProducto, idPedido, idProductoColores]
+                );
+            }
+        }
+
+      
+        if (newStatus === "Finalizado" || newStatus === "Cancelado") { 
+            const [productosDetalle] = await connection.query(
+                `SELECT idProductoColores, cantidad 
+                 FROM tblpedidodetalles 
+                 WHERE idPedido = ?`,
+                [idPedido]
+            );
+
+            for (const producto of productosDetalle) {
+                const { idProductoColores, cantidad } = producto;
+                
+               
+                const [updateInventarioResult] = await connection.query(
+                    `UPDATE tblinventario SET stock = stock + ? 
+                     WHERE idProductoColor = ?`,
+                    [cantidad, idProductoColores]
+                );
+
+                if (updateInventarioResult.affectedRows === 0) {
+                     console.warn(`Advertencia: No se encontró o actualizó el inventario para idProductoColor ${idProductoColores} del pedido ${idPedido}.`);
+                    
+                }
+            }
+        }
+        
+     
+        let puntosGanados = 0; 
+        
+        if (newStatus === 'Finalizado' && idUsuario) {
+            
+         
+            puntosGanados = Math.floor(totalPagar / 10);
+            
+            if (puntosGanados > 0) {
+                const tipoMovimiento = `Puntos por renta finalizada (Pedido #${idPedido})`;
+                
+              
+                await connection.query(
+                    `INSERT INTO tblPuntos (idUsuario, tipoMovimiento, puntos, fechaMovimiento, idPedido) 
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [idUsuario, tipoMovimiento, puntosGanados, fechaActualizacion, idPedido]
+                );
+
+                const [nivelRows] = await connection.query(
+                    "SELECT PuntosReales FROM tblNiveles WHERE idUsuarios = ?", 
+                    [idUsuario]
+                );
+                const puntosActuales = nivelRows.length > 0 ? nivelRows[0].PuntosReales : 0;
+                const nuevosPuntosReales = puntosActuales + puntosGanados;
+
+                const { nuevoNivel, nuevosBeneficios } = determinarNivel(nuevosPuntosReales);
+
+                await connection.query(
+                    `INSERT INTO tblNiveles (idUsuarios, nivel, PuntosReales, beneficios) 
+                     VALUES (?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE 
+                       nivel = VALUES(nivel), 
+                       PuntosReales = VALUES(PuntosReales), 
+                       beneficios = VALUES(beneficios);`,
+                    [idUsuario, nuevoNivel, nuevosPuntosReales, nuevosBeneficios]
+                );
+            } 
+         
+            await verificarYAsignarLogros(
+                'PEDIDO_FINALIZADO', 
+                idUsuario, 
+                connection, 
+                { idPedido: idPedido } 
+            );
+            
+        } 
+
+        await connection.commit();
+       let message = `Estado del pedido #${idPedido} actualizado a '${newStatus}'.`;
+        if (newStatus === 'Finalizado' || newStatus === 'Cancelado') {
+            message += " El stock ha sido actualizado.";
+        }
+        if (puntosGanados > 0) {
+            message += ` El cliente ha ganado ${puntosGanados} puntos.`;
+        } else if (newStatus === 'Finalizado' && !idUsuario) {
+            message += " (Pedido de cliente no registrado, no se asignaron puntos/logros).";
+        }
+
+        res.json({ success: true, message: message });
+
+    } catch (error) {
+        if (connection) {
+            await connection.rollback();
+        }
+        console.error("Error al actualizar estado del pedido:", error);
+        res.status(500).json({ success: false, message: "Error interno al actualizar el estado.", error: error.message });
+    } finally {
+        if (connection) {
+            connection.release();
+        }
     }
-
-    // Confirmar la transacción
-    await connection.commit();
-
-    res.json({ success: true, message: "Estado actualizado correctamente y stock actualizado (si aplica)" });
-  } catch (error) {
-    // Revertir la transacción en caso de error
-    await connection.rollback();
-    console.error("Error al actualizar pedido:", error);
-    res.status(500).json({ success: false, message: "Error al actualizar pedido", error: error.message });
-  } finally {
-    // Liberar la conexión
-    connection.release();
-  }
 });
+
 
 
 routerPedidos.get('/historial-pedidos',verifyToken, csrfProtection, async (req, res) => {
@@ -1814,6 +1910,7 @@ routerPedidos.post("/calificar",csrfProtection,verifyToken, async (req, res) => 
                 message: "La calificación debe ser un valor entre 1 y 5.",
             });
         }
+      
         const [pedidoRows] = await connection.query(
             `
             SELECT estadoActual 
@@ -1881,6 +1978,33 @@ routerPedidos.post("/calificar",csrfProtection,verifyToken, async (req, res) => 
             [idUsuarios, tipoMovimiento, puntosAGanar, new Date(), idPedido] 
            
         );
+
+        const [nivelRows] = await connection.query(
+            "SELECT PuntosReales FROM tblNiveles WHERE idUsuarios = ?", 
+            [idUsuarios]
+        );
+        const puntosActuales = nivelRows.length > 0 ? nivelRows[0].PuntosReales : 0;
+        const nuevosPuntosReales = puntosActuales + puntosAGanar;
+        const { nuevoNivel, nuevosBeneficios } = determinarNivel(nuevosPuntosReales);
+        
+        await connection.query(
+            `INSERT INTO tblNiveles (idUsuarios, nivel, PuntosReales, beneficios) 
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+               nivel = VALUES(nivel), 
+               PuntosReales = VALUES(PuntosReales), 
+               beneficios = VALUES(beneficios);`,
+            [idUsuarios, nuevoNivel, nuevosPuntosReales, nuevosBeneficios]
+        );
+        if (tieneFotos) {
+            await verificarYAsignarLogros(
+                'RESEÑA_CON_FOTO', 
+                idUsuarios,       
+                connection        
+            );
+        }
+
+
         await connection.commit();
 
        

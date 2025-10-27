@@ -28,3 +28,10 @@ Thumbs.db
 # Ignorar archivos de empaquetado
 *.tgz
 .
+
+# Ignorar logs
+/logs/
+*.log
+
+# Ignorar dependencias
+/node_modules/
