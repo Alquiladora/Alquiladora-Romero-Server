@@ -2759,3 +2759,5 @@
 {"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-10-27 12:12:31"}}
 {"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-10-27 12:15:04"}}
 {"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-10-27 12:15:04"}}
+{"level":"info","message":"Conexión a la base de datos establecida","metadata":{"db":"u509380733_alquiromero","timestamp":"2025-10-27 12:15:08"}}
+{"level":"info","message":"WebSocket inicializado","metadata":{"timestamp":"2025-10-27 12:15:08"}}

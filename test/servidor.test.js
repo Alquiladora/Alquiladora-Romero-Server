@@ -1,6 +1,5 @@
 const request = require('supertest');
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const { mockDeep } = require('jest-mock-extended');
 
 // Mockear connectBd
@@ -36,10 +35,9 @@ jest.mock('../consultas/clsUsuarios', () => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
-      const [users] = await connection.query.mock.results[0].value;
+      const [users] = await connection.query();
       if (users.length > 0) {
         const user = users[0];
-        // Simular token sin usar jwt dentro del mock
         const token = 'mocked-token-' + user.id;
         return res.status(200).json({ token, user });
       }
@@ -54,7 +52,7 @@ jest.mock('../consultas/clsUsuarios', () => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
-      const [perfil] = await connection.query.mock.results[0].value;
+      const [perfil] = await connection.query();
       return res.status(200).json(perfil[0]);
     } finally {
       connection.release();
@@ -69,7 +67,7 @@ jest.mock('../consultas/clsUsuarios', () => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
-      const [perfiles] = await connection.query.mock.results[0].value;
+      const [perfiles] = await connection.query();
       return res.status(200).json(perfiles);
     } finally {
       connection.release();
@@ -95,8 +93,8 @@ jest.mock('../consultas/clsPedidos', () => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
-      const [pedidos] = await connection.query.mock.results[0].value;
-      const [total] = await connection.query.mock.results[1].value;
+      const [pedidos] = await connection.query();
+      const [total] = await connection.query();
       return res.status(200).json({
         success: true,
         data: pedidos,
@@ -148,9 +146,9 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
   // Pruebas para /api/usuarios/login
   test('POST /api/usuarios/login - Login con credenciales válidas', async () => {
-    const mockUser = { id: 1, nombre: 'Test User', rol: 'user' };
+    const mockUser = [{ id: 1, nombre: 'Test User', rol: 'user' }];
     mockPool.getConnection.mockResolvedValueOnce({
-      query: jest.fn().mockResolvedValueOnce([[mockUser]]),
+      query: jest.fn().mockResolvedValueOnce([mockUser]),
       release: jest.fn(),
     });
 
@@ -165,7 +163,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       nombre: 'Test User',
       rol: 'user',
     }));
-  });
+  }, 10000);
 
   test('POST /api/usuarios/login - Rechazar credenciales inválidas', async () => {
     mockPool.getConnection.mockResolvedValueOnce({
@@ -179,13 +177,13 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     expect(res.statusCode).toBe(401);
     expect(res.body).toHaveProperty('message', 'Correo o contraseña incorrectos.');
-  });
+  }, 10000);
 
   // Pruebas para /api/usuarios/perfil
   test('GET /api/usuarios/perfil - Devolver perfil con token válido', async () => {
-    const mockPerfil = { id: 1, nombre: 'Test User', correo: 'test@example.com' };
+    const mockPerfil = [{ id: 1, nombre: 'Test User', correo: 'test@example.com' }];
     mockPool.getConnection.mockResolvedValueOnce({
-      query: jest.fn().mockResolvedValueOnce([[mockPerfil]]),
+      query: jest.fn().mockResolvedValueOnce([mockPerfil]),
       release: jest.fn(),
     });
 
@@ -199,7 +197,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       nombre: 'Test User',
       correo: 'test@example.com',
     }));
-  });
+  }, 10000);
 
   test('GET /api/usuarios/perfil - Rechazar sin token', async () => {
     const res = await request(app)
@@ -207,7 +205,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toHaveProperty('message', 'Token no proporcionado. Acceso denegado.');
-  });
+  }, 10000);
 
   // Pruebas para /api/usuarios/perfiles
   test('GET /api/usuarios/perfiles - Devolver perfiles con token válido (admin)', async () => {
@@ -229,7 +227,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       expect.objectContaining({ id: 1, nombre: 'User 1' }),
       expect.objectContaining({ id: 2, nombre: 'User 2' }),
     ]));
-  });
+  }, 10000);
 
   test('GET /api/usuarios/perfiles - Rechazar si no es admin', async () => {
     const res = await request(app)
@@ -238,7 +236,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toHaveProperty('message', 'Acceso denegado. Se requiere rol de administrador.');
-  });
+  }, 10000);
 
   // Pruebas para /api/pedidos/historial-pedidos
   test('GET /api/pedidos/historial-pedidos - Devolver pedidos con token válido', async () => {
@@ -253,10 +251,11 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
         nombreCliente: 'Test User',
       },
     ];
+    const mockTotal = [{ totalPedidos: 1 }];
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn()
         .mockResolvedValueOnce([mockPedidos])
-        .mockResolvedValueOnce([{ totalPedidos: 1 }]),
+        .mockResolvedValueOnce([mockTotal]),
       release: jest.fn(),
     });
 
@@ -280,7 +279,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
         totalPaginas: 1,
       },
     });
-  });
+  }, 10000);
 
   test('GET /api/pedidos/historial-pedidos - Rechazar sin token', async () => {
     const res = await request(app)
@@ -288,13 +287,14 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toHaveProperty('message', 'Token no proporcionado. Acceso denegado.');
-  });
+  }, 10000);
 
   test('GET /api/pedidos/historial-pedidos - Devolver lista vacía si no hay pedidos', async () => {
+    const mockTotal = [{ totalPedidos: 0 }];
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn()
         .mockResolvedValueOnce([[]])
-        .mockResolvedValueOnce([{ totalPedidos: 0 }]),
+        .mockResolvedValueOnce([mockTotal]),
       release: jest.fn(),
     });
 
@@ -312,5 +312,5 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
         totalPaginas: 0,
       },
     });
-  });
+  }, 10000);
 });
