@@ -6,14 +6,46 @@ const routerPedidos = require('../consultas/clsPedidos');
 const { pool } = require('../connectBd');
 const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
 
+// Mockear connectBd
 jest.mock('../connectBd', () => ({
   pool: mockDeep(),
 }));
 
+// Mockear clsUsuarios
 jest.mock('../consultas/clsUsuarios', () => ({
   verifyToken: jest.fn(),
   obtenerFechaMexico: jest.fn(() => '2025-10-27 10:59:00'),
+  usuarioRouter: express.Router(), // Mockear usuarioRouter
 }));
+
+// Mockear todos los módulos importados en rutas.js
+const mockRouter = () => {
+  const router = express.Router();
+  router.get('/test', (req, res) => res.json({ message: 'Mocked route' }));
+  return router;
+};
+
+jest.mock('../consultas/clsCorreo', () => mockRouter());
+jest.mock('../consultas/clsToken', () => mockRouter());
+jest.mock('../consultas/clsAuditoria', () => mockRouter());
+jest.mock('../consultas/clsImagenes', () => mockRouter());
+jest.mock('../consultas/clssesiones', () => mockRouter());
+jest.mock('../consultas/clsProductos', () => mockRouter());
+jest.mock('../consultas/mfa', () => mockRouter());
+jest.mock('../consultas/clsEmpresa', () => mockRouter());
+jest.mock('../consultas/clsPoliticas', () => mockRouter());
+jest.mock('../consultas/clsTerminos', () => mockRouter());
+jest.mock('../consultas/clsDeslin', () => mockRouter());
+jest.mock('../consultas/clsSobreNosotros', () => mockRouter());
+jest.mock('../consultas/clsPrecios', () => mockRouter());
+jest.mock('../consultas/clsBodegas', () => mockRouter());
+jest.mock('../consultas/clsInventario', () => mockRouter());
+jest.mock('../consultas/clsDireccion', () => mockRouter());
+jest.mock('../consultas/clsCarrito', () => mockRouter());
+jest.mock('../consultas/clsColores', () => mockRouter());
+jest.mock('../consultas/clsHorario', () => mockRouter());
+jest.mock('../consultas/clsRepartidorPedidos', () => mockRouter());
+jest.mock('../consultas/clsWearos', () => mockRouter());
 
 describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', () => {
   let app;
