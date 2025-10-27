@@ -24,22 +24,8 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Cachear dependencias
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+      - name: Instalar dependencias (npm install)
+        run: npm install
 
-      - name: Instalar dependencias
-        run: npm ci
-
-      - name: Ejecutar Pruebas
-        run: npm test -- --coverage
-
-      - name: Subir reporte de cobertura
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage/lcov.info
-          fail_ci_if_error: true
+      - name: Ejecutar Pruebas (npm test)
+        run: npm test
