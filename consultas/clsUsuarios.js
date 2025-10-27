@@ -40,7 +40,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 //========================COOKIES================================================
-const isProd = process.env.NODE_ENV === "development";
+const isProd = process.env.NODE_ENV === "production";
 
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
