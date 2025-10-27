@@ -2,23 +2,21 @@ const request = require('supertest');
 const express = require('express');
 const { mockDeep } = require('jest-mock-extended');
 
-// Mockear connectBd
+
 jest.mock('../connectBd', () => ({
   pool: mockDeep(),
 }));
 
-// Mockear clsUsuarios
+
 jest.mock('../consultas/clsUsuarios', () => {
   const express = require('express');
   const usuarioRouter = express.Router();
 
-  // Mock de verifyToken
   const verifyToken = jest.fn((req, res, next) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(403).json({ message: 'Token no proporcionado. Acceso denegado.' });
     }
-    // Simular verificación de token
     const mockUser = req.headers.authorization.includes('valid-token') 
       ? { id: 1, nombre: 'Test User', rol: req.headers.authorization.includes('admin') ? 'admin' : 'user' }
       : null;
@@ -29,7 +27,7 @@ jest.mock('../consultas/clsUsuarios', () => {
     next();
   });
 
-  // Ruta /login
+
   usuarioRouter.post('/login', async (req, res) => {
     const { correo, contrasena } = req.body;
     const mockPool = require('../connectBd').pool;
@@ -59,7 +57,7 @@ jest.mock('../consultas/clsUsuarios', () => {
     }
   });
 
-  // Ruta /perfiles
+
   usuarioRouter.get('/perfiles', verifyToken, async (req, res) => {
     if (req.user.rol !== 'admin') {
       return res.status(403).json({ message: 'Acceso denegado. Se requiere rol de administrador.' });
@@ -81,7 +79,7 @@ jest.mock('../consultas/clsUsuarios', () => {
   };
 });
 
-// Mockear clsPedidos
+
 jest.mock('../consultas/clsPedidos', () => {
   const express = require('express');
   const router = express.Router();
@@ -144,7 +142,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
     jest.resetAllMocks();
   });
 
-  // Pruebas para /api/usuarios/login
+
   test('POST /api/usuarios/login - Login con credenciales válidas', async () => {
     const mockUser = [{ id: 1, nombre: 'Test User', rol: 'user' }];
     mockPool.getConnection.mockResolvedValueOnce({
@@ -179,7 +177,6 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
     expect(res.body).toHaveProperty('message', 'Correo o contraseña incorrectos.');
   }, 10000);
 
-  // Pruebas para /api/usuarios/perfil
   test('GET /api/usuarios/perfil - Devolver perfil con token válido', async () => {
     const mockPerfil = [{ id: 1, nombre: 'Test User', correo: 'test@example.com' }];
     mockPool.getConnection.mockResolvedValueOnce({
@@ -207,7 +204,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
     expect(res.body).toHaveProperty('message', 'Token no proporcionado. Acceso denegado.');
   }, 10000);
 
-  // Pruebas para /api/usuarios/perfiles
+
   test('GET /api/usuarios/perfiles - Devolver perfiles con token válido (admin)', async () => {
     const mockPerfiles = [
       { id: 1, nombre: 'User 1', correo: 'user1@example.com' },
@@ -238,7 +235,6 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
     expect(res.body).toHaveProperty('message', 'Acceso denegado. Se requiere rol de administrador.');
   }, 10000);
 
-  // Pruebas para /api/pedidos/historial-pedidos
   test('GET /api/pedidos/historial-pedidos - Devolver pedidos con token válido', async () => {
     const mockPedidos = [
       {
