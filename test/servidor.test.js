@@ -13,22 +13,6 @@ jest.mock('../consultas/clsUsuarios', () => {
   const express = require('express');
   const usuarioRouter = express.Router();
 
-  // Simular middleware verifyToken
-  const verifyToken = jest.fn((req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(403).json({ message: 'Token no proporcionado. Acceso denegado.' });
-    }
-    const token = authHeader.split(' ')[1];
-    try {
-      const decoded = jwt.verify(token, 'your-secret-key');
-      req.user = decoded;
-      next();
-    } catch (err) {
-      return res.status(401).json({ message: 'El token ha expirado. Inicia sesión nuevamente.' });
-    }
-  });
-
   // Ruta /login
   usuarioRouter.post('/login', async (req, res) => {
     const { correo, contrasena } = req.body;
@@ -48,7 +32,7 @@ jest.mock('../consultas/clsUsuarios', () => {
   });
 
   // Ruta /perfil
-  usuarioRouter.get('/perfil', verifyToken, async (req, res) => {
+  usuarioRouter.get('/perfil', (req, res, next) => verifyToken(req, res, next), async (req, res) => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
@@ -60,7 +44,7 @@ jest.mock('../consultas/clsUsuarios', () => {
   });
 
   // Ruta /perfiles
-  usuarioRouter.get('/perfiles', verifyToken, async (req, res) => {
+  usuarioRouter.get('/perfiles', (req, res, next) => verifyToken(req, res, next), async (req, res) => {
     if (req.user.rol !== 'admin') {
       return res.status(403).json({ message: 'Acceso denegado. Se requiere rol de administrador.' });
     }
@@ -71,6 +55,22 @@ jest.mock('../consultas/clsUsuarios', () => {
       return res.status(200).json(perfiles);
     } finally {
       connection.release();
+    }
+  });
+
+  // Mock de verifyToken
+  const verifyToken = jest.fn((req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(403).json({ message: 'Token no proporcionado. Acceso denegado.' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, 'your-secret-key');
+      req.user = decoded;
+      next();
+    } catch (err) {
+      return res.status(401).json({ message: 'El token ha expirado. Inicia sesión nuevamente.' });
     }
   });
 
@@ -85,9 +85,11 @@ jest.mock('../consultas/clsUsuarios', () => {
 jest.mock('../consultas/clsPedidos', () => {
   const express = require('express');
   const router = express.Router();
-  const { verifyToken } = require('../consultas/clsUsuarios');
 
-  router.get('/historial-pedidos', verifyToken, async (req, res) => {
+  router.get('/historial-pedidos', (req, res, next) => {
+    const { verifyToken } = require('../consultas/clsUsuarios');
+    verifyToken(req, res, next);
+  }, async (req, res) => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
