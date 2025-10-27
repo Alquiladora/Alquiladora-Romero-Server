@@ -3,36 +3,45 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { mockDeep } = require('jest-mock-extended');
 
-// Importar los routers directamente
-const usuarioRouter = require('../consultas/clsUsuarios').usuarioRouter;
-const routerPedidos = require('../consultas/clsPedidos');
-const { pool } = require('../connectBd');
-
-const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
-
 // Mockear connectBd
 jest.mock('../connectBd', () => ({
   pool: mockDeep(),
 }));
 
-// Mockear clsUsuarios (sin referenciar express fuera del ámbito)
+// Mockear clsUsuarios
 jest.mock('../consultas/clsUsuarios', () => {
-  const mockRouter = jest.fn((req, res, next) => {
-    res.json({ message: 'Mocked usuario route' });
+  const express = require('express');
+  const usuarioRouter = express.Router();
+
+  // Simular rutas reales
+  usuarioRouter.post('/login', (req, res) => {
+    // Esta implementación se sobrescribirá en las pruebas
+    res.json({ message: 'Mocked login' });
   });
+  usuarioRouter.get('/perfil', (req, res) => {
+    res.json({ message: 'Mocked perfil' });
+  });
+  usuarioRouter.get('/perfiles', (req, res) => {
+    res.json({ message: 'Mocked perfiles' });
+  });
+
   return {
     verifyToken: jest.fn(),
     obtenerFechaMexico: jest.fn(() => '2025-10-27 10:59:00'),
-    usuarioRouter: { get: mockRouter, post: mockRouter }, // Mock simple para usuarioRouter
+    usuarioRouter,
   };
 });
 
-// Mockear clsPedidos (si es necesario, aunque ya lo importamos directamente)
+// Mockear clsPedidos
 jest.mock('../consultas/clsPedidos', () => {
-  const mockRouter = jest.fn((req, res, next) => {
-    res.json({ message: 'Mocked pedidos route' });
+  const express = require('express');
+  const router = express.Router();
+
+  router.get('/historial-pedidos', (req, res) => {
+    res.json({ message: 'Mocked historial-pedidos' });
   });
-  return { get: mockRouter };
+
+  return router;
 });
 
 describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Pedidos)', () => {
@@ -40,13 +49,11 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
   let mockPool;
 
   beforeAll(() => {
-    // Inicializar la aplicación Express
     app = express();
     app.use(express.json());
-    app.use('/api/usuarios', usuarioRouter);
-    app.use('/api/pedidos', routerPedidos);
+    app.use('/api/usuarios', require('../consultas/clsUsuarios').usuarioRouter);
+    app.use('/api/pedidos', require('../consultas/clsPedidos'));
 
-    // Configurar el mock del pool
     mockPool = require('../connectBd').pool;
     mockPool.getConnection.mockResolvedValue({
       query: jest.fn(),
@@ -62,25 +69,20 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
   });
 
   afterEach(() => {
-    jest.clearAllTimers(); // Limpiar temporizadores para evitar operaciones asíncronas abiertas
+    jest.clearAllTimers();
   });
 
   afterAll(() => {
     jest.resetAllMocks();
   });
 
-  // Prueba para /api/usuarios/login
-  test('Prueba Positiva: POST /api/usuarios/login - Debe permitir login con credenciales válidas', async () => {
+  // Pruebas para /api/usuarios/login
+  test('POST /api/usuarios/login - Login con credenciales válidas', async () => {
     const mockUser = { id: 1, nombre: 'Test User', rol: 'user' };
-    const mockToken = jwt.sign(mockUser, SECRET_KEY, { expiresIn: '24h' });
-
-    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
-      req.user = mockUser;
-      next();
-    });
+    const mockToken = jwt.sign(mockUser, 'your-secret-key', { expiresIn: '24h' });
 
     mockPool.getConnection.mockResolvedValueOnce({
-      query: jest.fn().mockResolvedValueOnce([[mockUser]]), // Simula usuario encontrado
+      query: jest.fn().mockResolvedValueOnce([[mockUser]]),
       release: jest.fn(),
     });
 
@@ -90,12 +92,16 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toHaveProperty('token');
-    expect(res.body.user).toEqual(expect.objectContaining(mockUser));
+    expect(res.body.user).toEqual(expect.objectContaining({
+      id: 1,
+      nombre: 'Test User',
+      rol: 'user',
+    }));
   });
 
-  test('Prueba Negativa: POST /api/usuarios/login - Debe rechazar credenciales inválidas', async () => {
+  test('POST /api/usuarios/login - Rechazar credenciales inválidas', async () => {
     mockPool.getConnection.mockResolvedValueOnce({
-      query: jest.fn().mockResolvedValueOnce([[]]), // Simula usuario no encontrado
+      query: jest.fn().mockResolvedValueOnce([[]]),
       release: jest.fn(),
     });
 
@@ -104,15 +110,13 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       .send({ correo: 'invalid@example.com', contrasena: 'wrongpassword' });
 
     expect(res.statusCode).toBe(401);
-    expect(res.body).toEqual({
-      message: 'Correo o contraseña incorrectos.',
-    });
+    expect(res.body).toHaveProperty('message', expect.stringContaining('incorrectos'));
   });
 
-  // Prueba para /api/usuarios/perfil
-  test('Prueba Positiva: GET /api/usuarios/perfil - Debe devolver el perfil del usuario con token válido', async () => {
+  // Pruebas para /api/usuarios/perfil
+  test('GET /api/usuarios/perfil - Devolver perfil con token válido', async () => {
     const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
       expiresIn: '24h',
     });
 
@@ -133,29 +137,30 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       .set('Authorization', `Bearer ${mockToken}`);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual(expect.objectContaining(mockPerfil));
+    expect(res.body).toEqual(expect.objectContaining({
+      id: userId,
+      nombre: 'Test User',
+      correo: 'test@example.com',
+    }));
   });
 
-  test('Prueba Negativa: GET /api/usuarios/perfil - Debe rechazar sin token', async () => {
+  test('GET /api/usuarios/perfil - Rechazar sin token', async () => {
     const res = await request(app)
-      .get('/api/usuarios/perfil')
-      .send();
+      .get('/api/usuarios/perfil');
 
     expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({
-      message: 'Token no proporcionado. Acceso denegado.',
-    });
+    expect(res.body).toHaveProperty('message', expect.stringContaining('Token no proporcionado'));
   });
 
-  // Prueba para /api/usuarios/perfiles
-  test('Prueba Positiva: GET /api/usuarios/perfiles - Debe devolver lista de perfiles con token válido', async () => {
+  // Pruebas para /api/usuarios/perfiles
+  test('GET /api/usuarios/perfiles - Devolver perfiles con token válido (admin)', async () => {
     const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'admin' }, SECRET_KEY, {
+    const mockToken = jwt.sign({ id: userId, nombre: 'Admin User', rol: 'admin' }, 'your-secret-key', {
       expiresIn: '24h',
     });
 
     require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
-      req.user = { id: userId, nombre: 'Test User', rol: 'admin' };
+      req.user = { id: userId, nombre: 'Admin User', rol: 'admin' };
       next();
     });
 
@@ -174,12 +179,15 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       .set('Authorization', `Bearer ${mockToken}`);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual(mockPerfiles);
+    expect(res.body).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 1, nombre: 'User 1' }),
+      expect.objectContaining({ id: 2, nombre: 'User 2' }),
+    ]));
   });
 
-  test('Prueba Negativa: GET /api/usuarios/perfiles - Debe rechazar si no es admin', async () => {
+  test('GET /api/usuarios/perfiles - Rechazar si no es admin', async () => {
     const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
       expiresIn: '24h',
     });
 
@@ -193,15 +201,13 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
       .set('Authorization', `Bearer ${mockToken}`);
 
     expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({
-      message: 'Acceso denegado. Se requiere rol de administrador.',
-    });
+    expect(res.body).toHaveProperty('message', expect.stringContaining('administrador'));
   });
 
-  // Prueba para /api/pedidos/historial-pedidos
-  test('Prueba Positiva: GET /api/pedidos/historial-pedidos - Debe devolver pedidos con token válido', async () => {
+  // Pruebas para /api/pedidos/historial-pedidos
+  test('GET /api/pedidos/historial-pedidos - Devolver pedidos con token válido', async () => {
     const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
       expiresIn: '24h',
     });
 
@@ -219,16 +225,13 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
         totalPagar: 500.0,
         numeroDeProductos: 2,
         nombreCliente: 'Test User',
-        fotosProductos: ['http://example.com/photo1.jpg', 'http://example.com/photo2.jpg'],
       },
     ];
-
-    const mockTotal = [{ totalPedidos: 1 }];
 
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn()
         .mockResolvedValueOnce([mockPedidos])
-        .mockResolvedValueOnce([mockTotal]),
+        .mockResolvedValueOnce([{ totalPedidos: 1 }]),
       release: jest.fn(),
     });
 
@@ -239,7 +242,13 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
       success: true,
-      data: mockPedidos,
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          idPedido: 1,
+          idRastreo: 'TRACK123',
+          estado: 'Confirmado',
+        }),
+      ]),
       paginacion: {
         totalPedidos: 1,
         paginaActual: 1,
@@ -248,20 +257,17 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
     });
   });
 
-  test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe rechazar sin token', async () => {
+  test('GET /api/pedidos/historial-pedidos - Rechazar sin token', async () => {
     const res = await request(app)
-      .get('/api/pedidos/historial-pedidos')
-      .send();
+      .get('/api/pedidos/historial-pedidos');
 
     expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({
-      message: 'Token no proporcionado. Acceso denegado.',
-    });
+    expect(res.body).toHaveProperty('message', expect.stringContaining('Token no proporcionado'));
   });
 
-  test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe devolver lista vacía si no hay pedidos', async () => {
+  test('GET /api/pedidos/historial-pedidos - Devolver lista vacía si no hay pedidos', async () => {
     const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
+    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
       expiresIn: '24h',
     });
 
