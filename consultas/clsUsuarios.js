@@ -40,7 +40,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 //========================COOKIES================================================
-const isProd = process.env.NODE_ENV === "production";
+const isProd = process.env.NODE_ENV === "development";
 
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
@@ -737,7 +737,7 @@ usuarioRouter.get("/perfil", verifyToken, async (req, res) => {
 //Perfil inicio
 usuarioRouter.get("/perfil-simple", verifyToken, async (req, res) => {
   const userId = req.user.id;
-  console.log("Datos recibidos", userId)
+  console.log("Datos recibidos de perfil", userId)
 
   try {
     const query = `
@@ -1141,9 +1141,8 @@ usuarioRouter.post("/desbloquear/:idUsuario", verifyToken, async (req, res) => {
   }
 });
 
-usuarioRouter.post(
-  "/validarToken/contrasena",
-  csrfProtection,
+
+usuarioRouter.post( "/validarToken/contrasena",csrfProtection,
   async (req, res, next) => {
     try {
       const { correo, token } = req.body;
@@ -1155,11 +1154,9 @@ usuarioRouter.post(
           .json({ message: "Correo o token no proporcionado." });
       }
 
-      // Buscar el token en la tabla tbltokens
       const queryToken =
         "SELECT * FROM tbltokens WHERE correo = ? AND token = ?";
       const [tokenRecords] = await pool.query(queryToken, [correo, token]);
-      console.log("Este es el resultado del token", tokenRecords);
 
       if (!tokenRecords.length) {
         return res
@@ -1168,25 +1165,36 @@ usuarioRouter.post(
       }
 
       const tokenData = tokenRecords[0];
+      console.log("Token data", tokenData);
+ 
+      const dbDate = tokenData.fechaExpiracion;
 
-      // Convertir la fecha de expiración (formato "YYYY-MM-DD HH:mm:ss") a objeto Date
-      const expirationDate = new Date(tokenData.fechaExpiracion);
-      const currentTime = new Date();
-      console.log("Toen exptrado", currentTime);
-      console.log("Expirado desde db", expirationDate);
+     
+      const y = dbDate.getUTCFullYear();
+      const m = (dbDate.getUTCMonth() + 1).toString().padStart(2, '0');
+      const d = dbDate.getUTCDate().toString().padStart(2, '0');
+      const h = dbDate.getUTCHours().toString().padStart(2, '0');
+      const min = dbDate.getUTCMinutes().toString().padStart(2, '0');
+      const s = dbDate.getUTCSeconds().toString().padStart(2, '0');
+
+  
+      const fechaExpiracionString = `${y}-${m}-${d}T${h}:${min}:${s}`;
+      
+      const expirationDate = new Date(fechaExpiracionString);
+      const currentTime = new Date(); 
+
+      console.log("Hora actual (Local):", currentTime.toLocaleString());
+      console.log("Hora expiración (Local):", expirationDate.toLocaleString());
 
       if (currentTime > expirationDate) {
+ 
         return res.status(400).json({ message: "El token ha expirado." });
       }
 
-      console.log(res.status(400), "este es el resultado de envio");
-
-      // Eliminar el token (se corrigió "corrreo" por "correo")
+     
       const deleteTokenQuery =
         "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
       await pool.query(deleteTokenQuery, [correo, token]);
-
-      console.log(res.status(200), "este es el resultado de envio");
 
       return res.status(200).json({
         message:
@@ -1198,6 +1206,7 @@ usuarioRouter.post(
     }
   }
 );
+
 
 usuarioRouter.post("/verify-password", csrfProtection, verifyToken, async (req, res) => {
   const { idUsuario, currentPassword } = req.body;

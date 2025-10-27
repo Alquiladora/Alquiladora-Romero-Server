@@ -1892,6 +1892,130 @@ routerRepartidorPedidos.post('/pedidos/:idPedido/incidente', verifyToken, csrfPr
   }
 });
 
+//Movil
+routerRepartidorPedidos.post('/pedidos/:idPedido/incidente-movil', verifyToken, async (req, res) => {
+  const { idPedido } = req.params;
+  const { entireOrderIssue, orderObservations, productIssues, estado_pedido } = req.body;
+   console.log("Datos recibidso idPEDIDO", idPedido )
+
+
+  console.log("Datos recibidso", entireOrderIssue, orderObservations, productIssues, estado_pedido )
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // Validar datos de entrada
+    if (!estado_pedido || !['Incompleto', 'Incidente'].includes(estado_pedido)) {
+      return res.status(400).json({
+        success: false,
+        message: 'El estado del pedido debe ser "Incompleto" o "Incidente".',
+      });
+    }
+
+    // Verificar si el pedido existe
+    const [existingPedido] = await connection.query(
+      'SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?',
+      [idPedido]
+    );
+
+    if (existingPedido.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Pedido no encontrado.',
+      });
+    }
+
+    const pedido = existingPedido[0];
+    const fechaModificacion = obtenerFechaMexico();
+
+    // Actualizar el estado del pedido
+   await connection.query(
+  'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
+  [
+    estado_pedido,     // nuevo estado
+    fechaModificacion, // nueva fecha
+    idPedido           // id del pedido a actualizar
+  ]
+);
+
+
+    // Caso 1: Incidente afecta todo el pedido
+    if (entireOrderIssue) {
+      await connection.query(
+        'UPDATE tblpedidodetalles SET estadoProducto = ?, observaciones = ? WHERE idPedido = ?',
+        [estado_pedido, orderObservations, idPedido]
+      );
+    } else {
+      // Caso 2: Incidente afecta productos específicos
+      if (!Array.isArray(productIssues) || productIssues.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Debe especificar al menos un producto afectado.',
+        });
+      }
+
+      for (const issue of productIssues) {
+        const { id, estado, cantidad_afectada, nota } = issue;
+
+        // Validar que el producto exista en el pedido
+        const [detalle] = await connection.query(
+          'SELECT cantidad FROM tblpedidodetalles WHERE idDetalle = ? AND idPedido = ?',
+          [id, idPedido]
+        );
+
+        if (detalle.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({
+            success: false,
+            message: `Detalle de producto con id ${id} no encontrado.`,
+          });
+        }
+
+        const cantidadDisponible = detalle[0].cantidad;
+        if (estado === 'Incompleto' && (cantidad_afectada <= 0 || cantidad_afectada > cantidadDisponible)) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `La cantidad afectada (${cantidad_afectada}) debe estar entre 1 y ${cantidadDisponible}.`,
+          });
+        }
+
+        // Actualizar el estado y observaciones del producto
+        await connection.query(
+          'UPDATE tblpedidodetalles SET estadoProducto = ?, observaciones = ?  WHERE idDetalle = ?',
+          [
+            estado,
+            nota,
+            id,
+          ]
+        );
+
+      
+      }
+    }
+
+    await connection.commit();
+
+    res.status(200).json({
+      success: true,
+      message: 'Incidente reportado y estados actualizados correctamente.',
+      data: { idPedido, estado_pedido },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('❌ Error al reportar incidente:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno al reportar el incidente.',
+      error: error.message,
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 
 
 
@@ -1952,6 +2076,65 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status/en-alquiler', verifyToken
     if (connection) connection.release();
   }
 });
+
+//Movil
+routerRepartidorPedidos.put('/pedidos/:idPedido/status-movil/en-alquiler', verifyToken, async (req, res) => {
+  const { idPedido } = req.params;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // Verificar si el pedido existe y está en estado "Enviando"
+    const [existingPedido] = await connection.query(
+      'SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?',
+      [idPedido]
+    );
+
+    if (existingPedido.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Pedido no encontrado.',
+      });
+    }
+
+    const pedido = existingPedido[0];
+    if (pedido.estadoActual !== 'Enviando') {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'El pedido debe estar en estado "Enviando" para marcarlo como "En alquiler".',
+      });
+    }
+
+    // Actualizar estado y registrar fecha de inicio de alquiler
+    const fechaModificacion = obtenerFechaMexico();
+    await connection.query(
+      'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
+      ['En alquiler', fechaModificacion,idPedido]
+    );
+
+    await connection.commit();
+
+    res.status(200).json({
+      success: true,
+      message: 'Pedido marcado como "En alquiler" correctamente.',
+      data: { idPedido, estadoActual: 'En alquiler' },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('❌ Error al marcar pedido como "En alquiler":', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno al actualizar el estado del pedido.',
+      error: error.message,
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 
 
 
@@ -2014,6 +2197,67 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status/devuelto', verifyToken, c
     if (connection) connection.release();
   }
 });
+
+//Mopvil
+routerRepartidorPedidos.put('/pedidos/:idPedido/status-movil/devuelto', verifyToken, csrfProtection, async (req, res) => {
+  const { idPedido } = req.params;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // Verificar si el pedido existe y está en estado válido
+    const [existingPedido] = await connection.query(
+      'SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?',
+      [idPedido]
+    );
+
+    if (existingPedido.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Pedido no encontrado.',
+      });
+    }
+
+    const pedido = existingPedido[0];
+    if (!['Recogiendo', 'En alquiler'].includes(pedido.estadoActual)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'El pedido debe estar en estado "Recogiendo" o "En alquiler" para marcarlo como "Devuelto".',
+      });
+    }
+
+
+    // Actualizar estado del pedido
+    const fechaModificacion = obtenerFechaMexico();
+    await connection.query(
+      'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
+      ['Devuelto', fechaModificacion, idPedido]
+    );
+
+    
+    await connection.commit();
+
+    res.status(200).json({
+      success: true,
+      message: 'Pedido marcado como "Devuelto" y productos devueltos al inventario.',
+      data: { idPedido, estadoActual: 'Devuelto' },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('❌ Error al marcar pedido como "Devuelto":', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno al actualizar el estado del pedido.',
+      error: error.message,
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 
 
 routerRepartidorPedidos.put(
