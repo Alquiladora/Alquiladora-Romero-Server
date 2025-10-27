@@ -13,6 +13,23 @@ jest.mock('../consultas/clsUsuarios', () => {
   const express = require('express');
   const usuarioRouter = express.Router();
 
+  // Mock de verifyToken
+  const verifyToken = jest.fn((req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(403).json({ message: 'Token no proporcionado. Acceso denegado.' });
+    }
+    // Simular verificación de token
+    const mockUser = req.headers.authorization.includes('valid-token') 
+      ? { id: 1, nombre: 'Test User', rol: req.headers.authorization.includes('admin') ? 'admin' : 'user' }
+      : null;
+    if (!mockUser) {
+      return res.status(401).json({ message: 'El token ha expirado. Inicia sesión nuevamente.' });
+    }
+    req.user = mockUser;
+    next();
+  });
+
   // Ruta /login
   usuarioRouter.post('/login', async (req, res) => {
     const { correo, contrasena } = req.body;
@@ -22,7 +39,8 @@ jest.mock('../consultas/clsUsuarios', () => {
       const [users] = await connection.query.mock.results[0].value;
       if (users.length > 0) {
         const user = users[0];
-        const token = jwt.sign({ id: user.id, nombre: user.nombre, rol: user.rol }, 'your-secret-key', { expiresIn: '24h' });
+        // Simular token sin usar jwt dentro del mock
+        const token = 'mocked-token-' + user.id;
         return res.status(200).json({ token, user });
       }
       return res.status(401).json({ message: 'Correo o contraseña incorrectos.' });
@@ -32,7 +50,7 @@ jest.mock('../consultas/clsUsuarios', () => {
   });
 
   // Ruta /perfil
-  usuarioRouter.get('/perfil', (req, res, next) => verifyToken(req, res, next), async (req, res) => {
+  usuarioRouter.get('/perfil', verifyToken, async (req, res) => {
     const mockPool = require('../connectBd').pool;
     const connection = await mockPool.getConnection();
     try {
@@ -44,7 +62,7 @@ jest.mock('../consultas/clsUsuarios', () => {
   });
 
   // Ruta /perfiles
-  usuarioRouter.get('/perfiles', (req, res, next) => verifyToken(req, res, next), async (req, res) => {
+  usuarioRouter.get('/perfiles', verifyToken, async (req, res) => {
     if (req.user.rol !== 'admin') {
       return res.status(403).json({ message: 'Acceso denegado. Se requiere rol de administrador.' });
     }
@@ -55,22 +73,6 @@ jest.mock('../consultas/clsUsuarios', () => {
       return res.status(200).json(perfiles);
     } finally {
       connection.release();
-    }
-  });
-
-  // Mock de verifyToken
-  const verifyToken = jest.fn((req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(403).json({ message: 'Token no proporcionado. Acceso denegado.' });
-    }
-    const token = authHeader.split(' ')[1];
-    try {
-      const decoded = jwt.verify(token, 'your-secret-key');
-      req.user = decoded;
-      next();
-    } catch (err) {
-      return res.status(401).json({ message: 'El token ha expirado. Inicia sesión nuevamente.' });
     }
   });
 
@@ -181,12 +183,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
   // Pruebas para /api/usuarios/perfil
   test('GET /api/usuarios/perfil - Devolver perfil con token válido', async () => {
-    const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
-      expiresIn: '24h',
-    });
-
-    const mockPerfil = { id: userId, nombre: 'Test User', correo: 'test@example.com' };
+    const mockPerfil = { id: 1, nombre: 'Test User', correo: 'test@example.com' };
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn().mockResolvedValueOnce([[mockPerfil]]),
       release: jest.fn(),
@@ -194,11 +191,11 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     const res = await request(app)
       .get('/api/usuarios/perfil')
-      .set('Authorization', `Bearer ${mockToken}`);
+      .set('Authorization', 'Bearer valid-token');
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual(expect.objectContaining({
-      id: userId,
+      id: 1,
       nombre: 'Test User',
       correo: 'test@example.com',
     }));
@@ -214,11 +211,6 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
   // Pruebas para /api/usuarios/perfiles
   test('GET /api/usuarios/perfiles - Devolver perfiles con token válido (admin)', async () => {
-    const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Admin User', rol: 'admin' }, 'your-secret-key', {
-      expiresIn: '24h',
-    });
-
     const mockPerfiles = [
       { id: 1, nombre: 'User 1', correo: 'user1@example.com' },
       { id: 2, nombre: 'User 2', correo: 'user2@example.com' },
@@ -230,7 +222,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     const res = await request(app)
       .get('/api/usuarios/perfiles')
-      .set('Authorization', `Bearer ${mockToken}`);
+      .set('Authorization', 'Bearer valid-token-admin');
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual(expect.arrayContaining([
@@ -240,14 +232,9 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
   });
 
   test('GET /api/usuarios/perfiles - Rechazar si no es admin', async () => {
-    const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
-      expiresIn: '24h',
-    });
-
     const res = await request(app)
       .get('/api/usuarios/perfiles')
-      .set('Authorization', `Bearer ${mockToken}`);
+      .set('Authorization', 'Bearer valid-token');
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toHaveProperty('message', 'Acceso denegado. Se requiere rol de administrador.');
@@ -255,11 +242,6 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
   // Pruebas para /api/pedidos/historial-pedidos
   test('GET /api/pedidos/historial-pedidos - Devolver pedidos con token válido', async () => {
-    const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
-      expiresIn: '24h',
-    });
-
     const mockPedidos = [
       {
         idPedido: 1,
@@ -280,7 +262,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     const res = await request(app)
       .get('/api/pedidos/historial-pedidos?pagina=1&limite=10')
-      .set('Authorization', `Bearer ${mockToken}`);
+      .set('Authorization', 'Bearer valid-token');
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
@@ -309,11 +291,6 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
   });
 
   test('GET /api/pedidos/historial-pedidos - Devolver lista vacía si no hay pedidos', async () => {
-    const userId = 1;
-    const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, 'your-secret-key', {
-      expiresIn: '24h',
-    });
-
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn()
         .mockResolvedValueOnce([[]])
@@ -323,7 +300,7 @@ describe('Integration Tests: API Básica (Login, Perfil, Perfiles, Historial Ped
 
     const res = await request(app)
       .get('/api/pedidos/historial-pedidos?pagina=1&limite=10')
-      .set('Authorization', `Bearer ${mockToken}`);
+      .set('Authorization', 'Bearer valid-token');
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({
