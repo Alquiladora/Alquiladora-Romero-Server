@@ -11,7 +11,7 @@ jest.mock('../connectBd', () => ({
   pool: mockDeep(),
 }));
 
-jest.mock('./clsUsuarios', () => ({
+jest.mock('../consultas/clsUsuarios', () => ({
   verifyToken: jest.fn(),
   obtenerFechaMexico: jest.fn(() => '2025-10-27 10:59:00'),
 }));
@@ -63,7 +63,7 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
   });
 
   test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe rechazar con token inválido', async () => {
-    require('./clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       return res.status(401).json({ message: 'El token ha expirado. Inicia sesión nuevamente.' });
     });
 
@@ -86,7 +86,7 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
 
 
-    require('./clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       req.user = { id: userId, nombre: 'Test User', rol: 'user' };
       next();
     });
@@ -139,7 +139,7 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
 
    
-    require('./clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       req.user = { id: userId, nombre: 'Test User', rol: 'user' };
       next();
     });
@@ -176,7 +176,7 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
 
 
-    require('./clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
+    require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       req.user = { id: userId, nombre: 'Test User', rol: 'user' };
       next();
     });
