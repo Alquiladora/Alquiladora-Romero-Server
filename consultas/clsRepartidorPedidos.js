@@ -299,9 +299,6 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
 
 
 
-function todayMx() {
-  return moment.tz("America/Mexico_City").startOf("day");
-}
 
 
 

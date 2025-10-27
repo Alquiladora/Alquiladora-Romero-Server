@@ -3,9 +3,8 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { mockDeep } = require('jest-mock-extended');
 const routerPedidos = require('../consultas/clsPedidos');
-const { pool } = require('../connectBd'); 
-const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key'; 
-
+const { pool } = require('../connectBd');
+const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key';
 
 jest.mock('../connectBd', () => ({
   pool: mockDeep(),
@@ -20,16 +19,12 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
   let app;
   let mockPool;
 
- 
   beforeAll(() => {
-
     app = express();
     app.use(express.json());
     app.use('/api/pedidos', routerPedidos);
 
-
     mockPool = require('../connectBd').pool;
-
 
     mockPool.getConnection.mockResolvedValue({
       query: jest.fn(),
@@ -40,16 +35,13 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
   });
 
-
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-
   afterAll(() => {
     jest.resetAllMocks();
   });
-
 
   test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe rechazar el acceso sin token', async () => {
     const res = await request(app)
@@ -78,19 +70,16 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
   });
 
-
   test('Prueba Positiva: GET /api/pedidos/historial-pedidos - Debe devolver pedidos con un token válido', async () => {
     const userId = 1;
     const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
       expiresIn: '24h',
     });
 
-
     require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       req.user = { id: userId, nombre: 'Test User', rol: 'user' };
       next();
     });
-
 
     const mockPedidos = [
       {
@@ -109,8 +98,8 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
 
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn()
-        .mockResolvedValueOnce([mockPedidos]) 
-        .mockResolvedValueOnce([mockTotal]), 
+        .mockResolvedValueOnce([mockPedidos])
+        .mockResolvedValueOnce([mockTotal]),
       release: jest.fn(),
     });
 
@@ -131,14 +120,12 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
   });
 
-
   test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe devolver lista vacía si no hay pedidos', async () => {
     const userId = 1;
     const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
       expiresIn: '24h',
     });
 
-   
     require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       req.user = { id: userId, nombre: 'Test User', rol: 'user' };
       next();
@@ -146,8 +133,8 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
 
     mockPool.getConnection.mockResolvedValueOnce({
       query: jest.fn()
-        .mockResolvedValueOnce([[]]) 
-        .mockResolvedValueOnce([{ totalPedidos: 0 }]), 
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([{ totalPedidos: 0 }]),
       release: jest.fn(),
     });
 
@@ -168,20 +155,17 @@ describe('Integration Tests: API de Pedidos (/api/pedidos/historial-pedidos)', (
     });
   });
 
- 
   test('Prueba Negativa: GET /api/pedidos/historial-pedidos - Debe manejar errores de base de datos', async () => {
     const userId = 1;
     const mockToken = jwt.sign({ id: userId, nombre: 'Test User', rol: 'user' }, SECRET_KEY, {
       expiresIn: '24h',
     });
 
-
     require('../consultas/clsUsuarios').verifyToken.mockImplementation((req, res, next) => {
       req.user = { id: userId, nombre: 'Test User', rol: 'user' };
       next();
     });
 
- 
     mockPool.getConnection.mockRejectedValueOnce(new Error('Database connection failed'));
 
     const res = await request(app)
