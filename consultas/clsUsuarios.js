@@ -18,6 +18,9 @@ usuarioRouter.use(express.json());
 usuarioRouter.use(cookieParser());
 const userSockets = getUserSockets();
 
+
+const {determinarNivel}= require('../config/logicaNiveles');
+
 //Variables para el ip
 const SECRET_KEY = process.env.SECRET_KEY.padEnd(32, " ");
 const MAX_FAILED_ATTEMPTS = 5;
@@ -973,115 +976,195 @@ usuarioRouter.patch("/perfil/:id/foto", verifyToken, async (req, res) => {
   console.log("perfil", userId);
   const { fotoPerfil } = req.body;
   const fechaActualizacion = obtenerFechaMexico();
+  const PUNTOS_POR_FOTO = 20;
 
   console.log("perfil", fotoPerfil);
   if (!fotoPerfil) {
     return res.status(400).json({ message: "Falta la imagen de perfil." });
   }
+  let connection;
 
   try {
-    const query = `
-      UPDATE tblperfilusuarios 
-      SET fotoPerfil = ?, fechaActualizacionF = ? 
-      WHERE idUsuarios = ?;
-    `;
-    const [updateResult] = await pool.query(query, [
-      fotoPerfil,
-      fechaActualizacion,
-      userId,
-    ]);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [userRows] = await connection.query(
+      "SELECT fotoPerfil FROM tblperfilusuarios WHERE idUsuarios = ?",
+      [userId]
+    );
 
-    if (updateResult.affectedRows === 0) {
+    if (userRows.length === 0) {
+      await connection.rollback();
       return res.status(404).json({ message: "Usuario no encontrado." });
     }
+    const fotoAnterior = userRows[0].fotoPerfil;
+    const esPrimeraVez = !fotoAnterior || fotoAnterior.trim() === '';
+
+   await connection.query(
+      `UPDATE tblperfilusuarios 
+       SET fotoPerfil = ?, fechaActualizacionF = ? 
+       WHERE idUsuarios = ?;`,
+      [fotoPerfil, fechaActualizacion, userId]
+    );
+    let bonusMessage = "";
+
+    if(esPrimeraVez){
+      await connection.query(
+        `INSERT INTO tblPuntos (idUsuario, tipoMovimiento, puntos, fechaMovimiento) 
+         VALUES (?, ?, ?, ?);`,
+        [userId, "Bonificación por primera foto de perfil", PUNTOS_POR_FOTO, fechaActualizacion]
+      );
+      const [nivelRows] = await connection.query(
+        "SELECT PuntosReales FROM tblNiveles WHERE idUsuarios = ?",
+        [userId]
+      );
+      const puntosActuales = nivelRows.length > 0 ? nivelRows[0].PuntosReales : 0;
+      const nuevosPuntosReales = puntosActuales + PUNTOS_POR_FOTO;
+      const { nuevoNivel, nuevosBeneficios } = determinarNivel(nuevosPuntosReales);
+      await connection.query(
+        `INSERT INTO tblNiveles (idUsuarios, nivel, PuntosReales, beneficios) 
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE 
+           nivel = VALUES(nivel), 
+           PuntosReales = VALUES(PuntosReales), 
+           beneficios = VALUES(beneficios);`,
+        [userId, nuevoNivel, nuevosPuntosReales, nuevosBeneficios]
+      );
+
+      bonusMessage = ` ¡Felicidades, ganaste ${PUNTOS_POR_FOTO} Puntos Fiesta!`;
+    }
+    await connection.commit();
+
     getIO().emit("actualizacionPerfil", {
       userId,
       tipo: "fotoPerfil",
       fotoPerfil,
     });
     res.json({
-      message: "Foto de perfil actualizada correctamente.",
+      message: "Foto de perfil actualizada correctamente." + bonusMessage,
       fotoPerfil,
     });
+
   } catch (error) {
+    if (connection) {
+      await connection.rollback();
+    }
     console.error("Error al actualizar la foto de perfil:", error);
     res.status(500).json({ message: "Error al actualizar la foto de perfil." });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 });
 
 //===============================================================================================
 //Actulizar el dato de usaurio en especifico
+const PUNTOS_PERFIL_COMPLETO = 50;
+const TIPO_MOVIMIENTO_PERFIL = "Bonificación por completar perfil";
+const CAMPOS_USUARIOS = ['nombre', 'apellidoP', 'apellidoM', 'telefono'];
+const CAMPOS_PERFIL = ['fechaNacimiento'];
+const CAMPOS_PERMITIDOS = [...CAMPOS_USUARIOS, ...CAMPOS_PERFIL];
+const CAMPOS_REQUERIDOS = ['nombre', 'apellidoP', 'apellidoM', 'telefono', 'fechaNacimiento'];
+
 usuarioRouter.patch("/perfil/:id/:field", csrfProtection, verifyToken, async (req, res) => {
-  let { id, field } = req.params;
-  let { value } = req.body;
+  const userId = req.params.id;
+    const field = req.params.field;
+    const { value } = req.body;
 
-  console.log("Datos recibidos:", { id, field, value });
-
-  // Lista de campos permitidos
-  const allowedFields = [
-    "nombre",
-    "apellidoP",
-    "apellidoM",
-    "telefono",
-    "fechaNacimiento",
-  ];
-
-  if (!allowedFields.includes(field)) {
-    return res
-      .status(400)
-      .json({ message: "Campo no permitido para actualización." });
-  }
-
-  // Formatear nombre y apellidos (Primera letra mayúscula, resto minúsculas)
-  if (["nombre", "apellidoP", "apellidoM"].includes(field)) {
-    value = value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
-  }
-
+    if (!CAMPOS_PERMITIDOS.includes(field)) {
+        return res.status(403).json({ message: "Operación no permitida." });
+    }
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    let tablaParaActualizar;
+if (CAMPOS_USUARIOS.includes(field)) {
+            tablaParaActualizar = 'tblusuarios';
+        } else {
+            
+            tablaParaActualizar = 'tblperfilusuarios';
+        }
 
-    if (field === "fechaNacimiento") {
-      console.log("Fecha recibida en el backend:", value);
+        
+        await connection.query(
+            `UPDATE ?? SET ?? = ? WHERE idUsuarios = ?`,
+            [tablaParaActualizar, field, value, userId]
+        );
 
-      const queryPerfil = `
-        UPDATE tblperfilusuarios 
-        SET fechaNacimiento = ? 
-        WHERE idUsuarios = ?
-      `;
-      const [result] = await connection.query(queryPerfil, [value, id]);
-      console.log("Resulltado de fecha n", result);
+      
+        const [bonusRows] = await connection.query(
+            `SELECT 1 FROM tblPuntos WHERE idUsuario = ? AND tipoMovimiento = ? LIMIT 1`,
+            [userId, TIPO_MOVIMIENTO_PERFIL]
+        );
+        
+        const yaRecibioBonus = bonusRows.length > 0;
+        let bonusMessage = ""; 
 
-      if (result.affectedRows === 0) {
-        await connection.rollback();
-        return res
-          .status(404)
-          .json({ message: "Perfil de usuario no encontrado." });
-      }
-    } else {
-      const query = `UPDATE tblusuarios SET ${field} = ? WHERE idUsuarios = ?`;
-      const [result] = await connection.query(query, [value, id]);
+        if (!yaRecibioBonus) {
+         
+            const [userRows] = await connection.query(
+                `SELECT 
+                    u.nombre, u.apellidoP, u.apellidoM, u.telefono, p.fechaNacimiento 
+                 FROM 
+                    tblusuarios u 
+                 LEFT JOIN 
+                    tblperfilusuarios p ON u.idUsuarios = p.idUsuarios 
+                 WHERE 
+                    u.idUsuarios = ?`,
+                [userId]
+            );
+            const usuario = userRows[0];
+            let perfilCompleto = true;
+            for (const campo of CAMPOS_REQUERIDOS) {
+                if (!usuario[campo] || (typeof usuario[campo] === 'string' && usuario[campo].trim() === '')) {
+                    perfilCompleto = false;
+                    break; 
+                }
+            }
 
-      if (result.affectedRows === 0) {
-        await connection.rollback();
-        return res.status(404).json({ message: "Usuario no encontrado." });
-      }
+            if (perfilCompleto) {
+                const fecha = obtenerFechaMexico();
+                
+             
+                await connection.query(
+                    `INSERT INTO tblPuntos (idUsuario, tipoMovimiento, puntos, fechaMovimiento) VALUES (?, ?, ?, ?);`,
+                    [userId, TIPO_MOVIMIENTO_PERFIL, PUNTOS_PERFIL_COMPLETO, fecha]
+                );
+                
+               
+                const [nivelRows] = await connection.query(
+                    "SELECT PuntosReales FROM tblNiveles WHERE idUsuarios = ?", [userId]
+                );
+                const puntosActuales = nivelRows.length > 0 ? nivelRows[0].PuntosReales : 0;
+                const nuevosPuntosReales = puntosActuales + PUNTOS_PERFIL_COMPLETO;
+
+                const { nuevoNivel, nuevosBeneficios } = determinarNivel(nuevosPuntosReales);
+
+                await connection.query(
+                    `INSERT INTO tblNiveles (idUsuarios, nivel, PuntosReales, beneficios) 
+                     VALUES (?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE 
+                       nivel = VALUES(nivel), PuntosReales = VALUES(PuntosReales), beneficios = VALUES(beneficios);`,
+                    [userId, nuevoNivel, nuevosPuntosReales, nuevosBeneficios]
+                );
+
+                bonusMessage = ` ¡Felicidades, ganaste ${PUNTOS_PERFIL_COMPLETO} Puntos Fiesta por completar tu perfil!`;
+            }
+        }
+        await connection.commit();
+        res.json({
+            success: true,
+            message: `El ${field} ha sido guardado correctamente.` + bonusMessage
+        });
+
+    } catch (error) {
+        if (connection) await connection.rollback();
+        console.error(`Error al guardar el ${field}:`, error); 
+        res.status(500).json({ message: `Hubo un error al guardar el ${field}.` });
+    } finally {
+        if (connection) connection.release();
     }
-
-    await connection.commit();
-    getIO().emit("actualizacionPerfil", { userId: id, campo: field, value });
-    res.json({
-      message: `${field} actualizado correctamente`,
-      updatedField: value,
-    });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    console.error(`Error al actualizar ${field}:`, error);
-    res.status(500).json({ message: `Error al actualizar ${field}.` });
-  } finally {
-    if (connection) connection.release();
-  }
 });
 
 //======================================
