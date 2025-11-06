@@ -165,7 +165,7 @@ const getFallbackRecommendations = async (connection) => {
       p.idProducto, 
       p.nombre, 
       pr.precioAlquiler,
-      MIN(pc.idProductoColores) AS idProductoColores, -- CORREGIDO
+      MIN(pc.idProductoColores) AS idProductoColores, 
       MIN(c.color) AS color,
       MIN(f.urlFoto) AS imagenProducto,
       SUM(i.stock) AS stockDisponible,
@@ -181,7 +181,7 @@ const getFallbackRecommendations = async (connection) => {
     JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
     WHERE i.stock > 0
     GROUP BY p.idProducto, p.nombre, pr.precioAlquiler, sc.nombre, cat.nombre
-    ORDER BY p.popularidad DESC
+     ORDER BY p.fechaCreacion DESC
     LIMIT 5
     `
   );
@@ -256,7 +256,7 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
               p.idProducto, 
               p.nombre, 
               pr.precioAlquiler,
-              MIN(pc.idProductoColores) AS idProductoColores, -- CORREGIDO
+              MIN(pc.idProductoColores) AS idProductoColores,
               MIN(c.color) AS color,
               MIN(f.urlFoto) AS imagenProducto,
               SUM(i.stock) AS stockDisponible,

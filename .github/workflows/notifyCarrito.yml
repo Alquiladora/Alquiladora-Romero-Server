@@ -1,0 +1,19 @@
+name: Tarea Programada (Carritos Abandonados)
+
+on:
+  schedule:
+ 
+   - cron: '0 2,14 * * *'
+  
+  workflow_dispatch: 
+
+jobs:
+  trigger-abandoned-cart-job:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Llamar al endpoint de carritos abandonados
+        run: |
+          curl -X POST "${{ secrets.API_URL }}/api/jobs/trigger-abandoned-cart" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+          --fail

@@ -40,7 +40,7 @@ routerPedidos.get("/pedidosmanuales/:correo", csrfProtection, async (req, res) =
   const correoUsuario = req.params.correo;
   console.log("Datos de correo elnpoy pedido", correoUsuario)
   try {
-    const [rows] = await pool.query(
+    const [rows] = await poolconnection.pool(
       `
 SELECT
     us.idUsuarios, 
@@ -147,7 +147,7 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
       }
 
       if (params.length > 0) {
-        const [clienteRows] = await pool.query(query + " LIMIT 1", params);
+        const [clienteRows] = await poolconnection.pool(query + " LIMIT 1", params);
         if (clienteRows.length > 0) {
           idCliente = clienteRows[0].id;
         }
@@ -2635,6 +2635,179 @@ routerPedidos.get("/pedidos/detalles/pagos", csrfProtection, async (req, res) =>
     });
   }
 });
+
+
+//Gamificacion-------------------------------
+routerPedidos.get("/Nivelesypuntos", csrfProtection, verifyToken, async (req, res) =>{
+  const idUsuario = req.user?.id;
+
+  if(!idUsuario){
+    return res.status(401).json({success: false, message: 'Usuario no autenticado'});
+  }
+  let connection;
+  try{
+   connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+    const [nivelRows] = await connection.query(
+            `SELECT nivel, PuntosReales, beneficios 
+             FROM tblNiveles 
+             WHERE idUsuarios = ?`,
+            [idUsuario]
+        );
+
+        const [puntosGastadosRows] = await connection.query(
+            `SELECT COALESCE(SUM(puntos), 0) AS totalGastado 
+             FROM tblPuntos 
+             WHERE idUsuario = ? AND puntos < 0`,
+            [idUsuario]
+        );
+        let totalEarnedPoints = 0;
+        let currentLevel = "Invitado"; 
+        let currentBenefit = "Acceso al programa de Puntos y Logros"; 
+
+        if (nivelRows.length > 0) {
+            totalEarnedPoints = nivelRows[0].PuntosReales || 0;
+            currentLevel = nivelRows[0].nivel;
+            currentBenefit = nivelRows[0].beneficios;
+        }
+        const spentPoints = Math.abs(puntosGastadosRows[0].totalGastado || 0);
+        const currentPoints = totalEarnedPoints - spentPoints;
+        res.status(200).json({
+            success: true,
+            data: {      
+                currentPoints: currentPoints,        
+                totalEarnedPoints: totalEarnedPoints,
+                spentPoints: spentPoints,           
+                levelPoints: totalEarnedPoints, 
+                currentLevelName: currentLevel,
+                currentLevelBenefit: currentBenefit
+            }
+        });
+
+    } catch (error) {
+        console.error("Error al obtener estado de gamificación:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error interno al obtener los datos de gamificación.",
+            error: error.message
+        });
+    } finally {
+        if (connection) connection.release();
+    }
+});
+
+
+
+routerPedidos.get("/insignias", csrfProtection, verifyToken, async (req, res) => {
+  const idUsuario = req.user?.id;
+
+  if (!idUsuario) {
+    return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+  
+    const [insigniasRows] = await connection.query(
+      `SELECT idInsignia, nombre, nivel, condicion 
+       FROM tblinsignias 
+       ORDER BY 
+         CASE nivel 
+           WHEN 'Bronce' THEN 1 
+           WHEN 'Plata' THEN 2 
+           WHEN 'Oro' THEN 3 
+           ELSE 4 
+         END, idInsignia`
+    );
+
+    
+    const [insigniasDesbloqueadasRows] = await connection.query(
+      `SELECT idInsignia, fechaObtencion 
+       FROM tblLogrosCliente 
+       WHERE idUsuario = ?`,
+      [idUsuario]
+    );
+
+   
+    const insigniasPorNivel = {
+      Bronce: [],
+      Plata: [],
+      Oro: []
+    };
+
+    let totalInsignias = 0;
+    let insigniasDesbloqueadas = 0;
+
+  
+    const insigniasDesbloqueadasMap = new Map();
+    insigniasDesbloqueadasRows.forEach(insignia => {
+      insigniasDesbloqueadasMap.set(insignia.idInsignia, true);
+    });
+
+  
+    insigniasRows.forEach(insignia => {
+      const estaDesbloqueada = insigniasDesbloqueadasMap.has(insignia.idInsignia);
+      
+      const insigniaData = {
+        id: insignia.idInsignia,
+        nombre: insignia.nombre,
+        descripcion: insignia.condicion,
+        desbloqueada: estaDesbloqueada,
+        fechaObtencion: estaDesbloqueada ? 
+          insigniasDesbloqueadasRows.find(i => i.idInsignia === insignia.idInsignia)?.fechaObtencion : null
+      };
+
+      if (insigniasPorNivel[insignia.nivel]) {
+        insigniasPorNivel[insignia.nivel].push(insigniaData);
+      }
+
+      totalInsignias++;
+      if (estaDesbloqueada) {
+        insigniasDesbloqueadas++;
+      }
+    });
+
+  
+    const progresoTotal = totalInsignias > 0 ? Math.round((insigniasDesbloqueadas / totalInsignias) * 100) : 0;
+
+   
+    const responseData = {
+      resumen: {
+        totalDesbloqueadas: insigniasDesbloqueadas,
+        totalPorConseguir: totalInsignias - insigniasDesbloqueadas,
+        progresoTotal: progresoTotal
+      },
+      insignias: insigniasPorNivel
+    };
+
+    await connection.commit();
+
+    res.status(200).json({
+      success: true,
+      data: responseData
+    });
+
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Error al obtener datos de insignias:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error interno al obtener los datos de insignias.",
+      error: error.message
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+
+
+
+
 
 
 
