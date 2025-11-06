@@ -3,7 +3,7 @@ name: Tarea Programada para subir NIVEL
 on:
   schedule:
   
-    - cron: '0 2 * * 4'
+    - cron: '0 14 * * 4'
   workflow_dispatch:
 
 jobs:

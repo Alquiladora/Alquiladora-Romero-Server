@@ -5,15 +5,7 @@ const { getIO } = require("../config/socket");
 const moment = require("moment");
 
 const { obtenerFechaMexico } = require("./clsUsuarios")
-const Stripe = require('stripe');
-const apiKey = process.env.STRIPE_SECRET_KEY || 'sk_test_DUMMY_KEY_FOR_JEST_123456789';
-const stripe = Stripe(apiKey);
-const axios = require("axios");
-const router = require("../rutas");
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-const { verifyToken } = require("./clsUsuarios");
-const { verificarYAsignarLogros } =  require('../config/logicaLogros');
-const { determinarNivel } = require('../config/logicaNiveles');
+
 const webpush = require('web-push');
 
 const routerJobs = express.Router();
