@@ -8,6 +8,7 @@ const winston = require("winston");
 const crypto = require("crypto");
 const { pool } = require("../connectBd");
 const { csrfProtection } = require("../config/csrf");
+const { verifyToken } = require("./clsUsuarios");
 
 
 const routerEmpresa = express.Router();
@@ -172,6 +173,39 @@ routerEmpresa.get("/sobreNosotros", async (req, res) => {
   } catch (error) {
     console.error("Error al obtener los datos de la empresa:", error);
     res.status(500).json({ message: "Error al obtener los datos de la empresa." });
+  }
+});
+
+
+routerEmpresa.get("/telefonoEmpresa", verifyToken, csrfProtection, async (req, res) => {
+  try {
+    const idUsuario = req.user?.id;
+
+    if (!idUsuario) {
+      return res.status(401).json({ message: "Usuario no autenticado." });
+    }
+
+    const [rows] = await pool.query("SELECT telefono FROM tbldatosempresa LIMIT 1");
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "No se encontraron datos de la empresa." });
+    }
+
+    return res.status(200).json({ telefono: rows[0].telefono });
+
+  } catch (error) {
+    console.error("Error al obtener los datos de la empresa:", error);
+
+    if (error.code === "ECONNRESET") {
+      return res.status(500).json({
+        message: "Error de conexión con la base de datos, por favor intente más tarde."
+      });
+    }
+
+    return res.status(500).json({
+      message: "Ocurrió un error al obtener los datos de la empresa.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
+    });
   }
 });
 

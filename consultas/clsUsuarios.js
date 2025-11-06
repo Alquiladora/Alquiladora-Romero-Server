@@ -10,6 +10,7 @@ const moment = require("moment-timezone");
 const cron = require("node-cron");
 const otplib = require("otplib");
 const qrcode = require("qrcode");
+require('dotenv').config();
 
 const { pool } = require("../connectBd");
 const { getIO, getUserSockets } = require("../config/socket");
@@ -25,7 +26,24 @@ const {determinarNivel}= require('../config/logicaNiveles');
 const SECRET_KEY = process.env.SECRET_KEY.padEnd(32, " ");
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_TIME = 10 * 60 * 1000;
-const TOKEN_EXPIRATION_TIME = 24 * 60 * 60 * 1000;
+const TOKEN_EXPIRATION_TIME = 12 * 60 * 60 * 1000;
+
+//Suscripcion de notificaciones
+const webpush = require('web-push');
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY; 
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY; 
+const VAPID_EMAIL = 'mailto:alquiladoraromero@bina5.com';
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+    throw new Error("Las variables VAPID_PUBLIC_KEY o VAPID_PRIVATE_KEY no están definidas en el entorno.");
+}
+
+webpush.setVapidDetails(
+    VAPID_EMAIL,
+    VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY
+);
+
 
 //importamos el recaptchat
 
@@ -43,7 +61,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 //========================COOKIES================================================
-const isProd = process.env.NODE_ENV === "production";
+const isProd = process.env.NODE_ENV === "development";
 
 //Funcion  para obtener la fecha actual
 function obtenerFechaMexico() {
@@ -281,7 +299,7 @@ usuarioRouter.post("/login", async (req, res, next) => {
     const token = jwt.sign(
       { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol },
       SECRET_KEY,
-      { expiresIn: "24h" }
+      { expiresIn: "12h" }
     );
 
     // Crear la cookie de sesión
@@ -430,7 +448,7 @@ usuarioRouter.post("/login-movil", async (req, res, next) => {
     const token = jwt.sign(
       { id: usuario.idUsuarios, nombre: usuario.nombre, rol: usuario.rol },
       SECRET_KEY,
-      { expiresIn: "24h" }
+      { expiresIn: "12h" }
     );
 
     // Crear la cookie de sesión
@@ -631,6 +649,7 @@ const verifyToken = async (req, res, next) => {
     else if (req.cookies?.sesionToken) {
       token = req.cookies.sesionToken;
     }
+
 
     if (!token) {
       return res.status(403).json({ message: "Token no proporcionado. Acceso denegado." });
@@ -1674,19 +1693,22 @@ usuarioRouter.put('/:userId/rol', csrfProtection, verifyToken, async (req, res) 
 //=========================================CRONS-JOBS=================================================
 async function verificarYLimpiarNoClientes() {
   let connection;
-
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    //Seleccionamos lo clientes que no se han registrado y ya paso mas de 1 mes de su ultimo pedido y sus pedidso estan en esatdo finalizado y cancelado
     const [noClientes] = await connection.query(`
      SELECT nc.idNoClientes
 FROM tblnoclientes nc
 LEFT JOIN tblpedidos p ON nc.idNoClientes = p.idNoClientes
 WHERE nc.idUsuario IS NULL
 GROUP BY nc.idNoClientes
-HAVING SUM(CASE WHEN p.estadoActual NOT IN ('Finalizado','Cancelado') THEN 1 ELSE 0 END) = 0
-   AND MAX(p.fechaRegistro) < DATE_SUB(NOW(), INTERVAL 3 MONTH);
+HAVING 
+    COUNT(CASE WHEN p.estadoActual NOT IN ('Finalizado','Cancelado') THEN 1 END) = 0
+    AND (
+        MAX(p.fechaRegistro) IS NULL 
+        OR MAX(p.fechaRegistro) < DATE_SUB(NOW(), INTERVAL 3 MONTH)
+    );
+
 
     `);
 
@@ -1729,9 +1751,6 @@ HAVING SUM(CASE WHEN p.estadoActual NOT IN ('Finalizado','Cancelado') THEN 1 ELS
   }
 }
 
-
-
-
 cron.schedule(
   "0 0 * * *",
   async () => {
@@ -1743,13 +1762,6 @@ cron.schedule(
     timezone: "America/Mexico_City",
   }
 );
-
-
-
-
-
-
-
 
 //-------------------------------------------------------MOVIL------------------------------------------------------------------------------------------------
 usuarioRouter.get("/movil-home", verifyToken, async (req, res) => {
@@ -1785,6 +1797,85 @@ usuarioRouter.get("/movil-home", verifyToken, async (req, res) => {
   }
 });
 
+//NOTIFICACIONES PWA--------------------------------------------
+usuarioRouter.get("/config/vapid-public-key", csrfProtection, (req, res) => {
+    try {
+        if (!VAPID_PUBLIC_KEY) {
+            return res.status(500).json({ message: "Clave de configuración VAPID faltante." });
+        }
+      
+        res.status(200).json({ publicKey: VAPID_PUBLIC_KEY });
+        
+    } catch (error) {
+        console.error("Error al servir clave VAPID:", error);
+        res.status(500).json({ message: "Error interno del servidor al obtener la configuración." });
+    }
+});
 
 
-module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };
+usuarioRouter.post('/suscripcion', csrfProtection, verifyToken, async (req, res) => {
+    const { subscription } = req.body;
+    const userIdAutenticado = req.user?.id;
+    console.log("Datos de notificaciones", subscription, userIdAutenticado)
+  
+    
+    const { endpoint, keys } = subscription;
+    const p256dh = keys.p256dh;
+    const auth = keys.auth;
+
+    if (!endpoint || !p256dh || !auth) {
+        return res.status(400).json({ message: "Datos de suscripción incompletos." });
+    }
+
+    try {
+        
+        const upsertQuery = `
+            INSERT INTO tblsuscripciones (idUsuarios, endpoint, p256dh, auth)
+            VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                idUsuarios = VALUES(idUsuarios),
+                p256dh = VALUES(p256dh),
+                auth = VALUES(auth)
+        `;
+        await pool.query(upsertQuery, [userIdAutenticado, endpoint, p256dh, auth]);
+        
+        res.status(201).json({ message: "Suscripción Push guardada y actualizada con éxito." });
+
+    } catch (error) {
+        console.error("⚠️ Error al guardar suscripción Push en la DB:", error);
+        res.status(500).json({ message: "Error interno al procesar la suscripción Push." });
+    }
+});
+
+usuarioRouter.post('/desuscripcion', csrfProtection, verifyToken, async (req, res) => {
+    const { endpoint } = req.body;
+    const userIdAutenticado = req.user.id; 
+
+    if (!endpoint) {
+        return res.status(400).json({ message: "Endpoint de suscripción es obligatorio para desvincular." });
+    }
+
+    try {
+        const updateQuery = `
+            UPDATE tblsuscripciones
+            SET idUsuarios = NULL  
+            WHERE endpoint = ? AND idUsuarios = ?
+        `;
+        
+        const [result] = await pool.query(updateQuery, [endpoint, userIdAutenticado]);
+
+        if (result.affectedRows === 0) {
+          
+            console.warn(`⚠️ Intento de desvincular un endpoint inexistente o ya desvinculado por el usuario ${userIdAutenticado}.`);
+        } else {
+            console.log(`✅ Suscripción desvinculada del Usuario ${userIdAutenticado} exitosamente.`);
+        }
+        res.status(200).json({ message: "Suscripción desvinculada de la sesión correctamente." });
+
+    } catch (error) {
+        console.error("❌ Error al procesar la desvinculación de suscripción:", error);
+        res.status(500).json({ message: "Error interno al procesar la desvinculación." });
+    }
+});
+
+module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };                                          
