@@ -12,6 +12,6 @@ jobs:
     steps:
       - name: Llamar al endpoint de 'Subir de Nivel'
         run: |
-          curl -X POST "${{ secrets.API_URL }}/api/JOBS/trigger-level-notifications" \
+          curl -X POST "${{ secrets.API_URL }}/api/jobs/trigger-level-notifications" \
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
           --fail
