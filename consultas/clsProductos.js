@@ -277,11 +277,12 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
   
 
   //Cosnul de lso productos detalles
-  produtosRouter.get("/producto/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const sql = `
-        SELECT
+produtosRouter.get("/producto/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sql = `
+       
+SELECT
           p.idProducto,
           p.nombre AS nombreProducto,
           p.detalles,
@@ -292,30 +293,49 @@ produtosRouter.get("/subcategorias/:subcategoria", async (req, res) => {
           c.idCategoria,
           c.nombre AS nombreCategoria,
           pr.precioAlquiler,
-          i.idProductoColor,
-          COALESCE(SUM(i.stock), 0) AS stock,
+          
+          pc.idProductoColores AS idProductoColor,
+          COALESCE(sub_inv.stock_total, 0) AS stock,
           col.color AS nombreColor,
           col.codigoH,
-          GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
+          (
+          SELECT GROUP_CONCAT(f.urlFoto SEPARATOR ',')
+          FROM tblfotosproductos f
+          WHERE f.idProducto = p.idProducto
+          )AS imagenes
+        
+          
         FROM tblproductos p
+        
         JOIN tblsubcategoria sc 
           ON p.idSubCategoria = sc.idSubCategoria
         JOIN tblcategoria c 
           ON sc.idCategoria = c.idCategoria
         LEFT JOIN tblprecio pr 
           ON p.idProducto = pr.idProducto
+          
         LEFT JOIN tblproductoscolores pc 
           ON p.idProducto = pc.idProducto
         LEFT JOIN tblcolores col 
           ON pc.idColor = col.idColores
-        LEFT JOIN tblinventario i 
-          ON pc.idProductoColores = i.idProductoColor
-        LEFT JOIN tblfotosproductos f 
-          ON p.idProducto = f.idProducto
+          
+        LEFT JOIN (
+    SELECT 
+        i.idProductoColor, 
+        SUM(i.stock) AS stock_total 
+    FROM tblinventario i
+    GROUP BY i.idProductoColor
+) AS sub_inv 
+    ON pc.idProductoColores = sub_inv.idProductoColor
         WHERE p.idProducto = ?
-        GROUP BY p.idProducto, col.idColores;
+       GROUP BY 
+    p.idProducto, 
+    pc.idProductoColores, 
+    pr.precioAlquiler, 
+    col.idColores, 
+    sub_inv.stock_total;
       `;
-      
+
       const [rows] = await pool.query(sql, [id]);
       if (!rows || rows.length === 0) {
         return res.status(404).json({

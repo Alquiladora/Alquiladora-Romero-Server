@@ -26,6 +26,7 @@ app.use(helmet({
     includeSubDomains: true,
     preload: true,
   } : false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -33,10 +34,13 @@ app.use(helmet({
         "'self'",
         ...(process.env.NODE_ENV === 'production' ? [
           "wss://alquiladora-romero-server.onrender.com", 
-          "https://alquiladora-romero-server.onrender.com", 
+          "https://alquiladora-romero-server.onrender.com",
+          "https://alquiladoraromero.bina5.com/"  
         ] : [
           "ws://localhost:3001", 
-          "http://localhost:3001", 
+          "http://localhost:3001",
+          "http://localhost:3000",
+         
         ]),
       ],
       scriptSrc: ["'self'"],
@@ -73,12 +77,12 @@ app.use(cors({
 app.options('*', cors());
 
 
-
+app.use(express.json());
 
 //=================RUTAS DEFINIDOS=======================
 app.use('/api/tarjetas', tarjetasRouter)
 
-app.use(express.json());
+
 app.use('/api', routers);
 
 //=======================================================

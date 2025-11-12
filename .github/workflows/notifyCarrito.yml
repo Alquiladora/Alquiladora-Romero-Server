@@ -3,7 +3,7 @@ name: Tarea Programada (Carritos Abandonados)
 on:
   schedule:
  
-   - cron: '0 2,14 * * *'
+  - cron: '0 0,4,12,17 * * *'
   
   workflow_dispatch: 
 
