@@ -614,41 +614,51 @@ produtosRouter.get("/categoria/:nombreCategoria", async (req, res) => {
   console.log("Parametro recibido", nombreCategoria);
   try {
     const sql = `
-         SELECT 
-        p.idProducto,
-        p.nombre AS nombreProducto,
-        p.fechaCreacion,
-        p.detalles,
-        sc.idSubCategoria,
-        sc.nombre AS nombreSubcategoria,
-        c.idCategoria ,
-        c.nombre AS nombreCategoria,
-        pr.precioAlquiler,
-        col.color AS nombreColor,
-        SUM(i.stock) AS stock,
-        i.estado AS estadoProducto,
-        GROUP_CONCAT(DISTINCT f.urlFoto) AS imagenes
-      FROM tblproductos p
-      JOIN tblsubcategoria sc 
-        ON p.idSubCategoria = sc.idSubCategoria
-      JOIN tblcategoria c 
-        ON sc.idCategoria = c.idCategoria
-      LEFT JOIN tblprecio pr
-        ON p.idProducto = pr.idProducto
-      LEFT JOIN tblproductoscolores pc 
-        ON p.idProducto = pc.idProducto
-      LEFT JOIN tblcolores col 
-        ON pc.idColor = col.idColores
-      LEFT JOIN tblinventario i 
-        ON pc.idProductoColores = i.idProductoColor
-      LEFT JOIN tblfotosproductos f
-        ON p.idProducto = f.idProducto
-      WHERE LOWER(c.nombre) = LOWER(?)
-      GROUP BY p.idProducto, col.idColores;
+     SELECT
+    p.idProducto,
+    p.nombre AS nombreProducto,
+    p.fechaCreacion,
+    p.detalles,
+    sc.idSubCategoria,
+    sc.nombre AS nombreSubcategoria,
+    c.idCategoria,
+    c.nombre AS nombreCategoria,
+    pr.precioAlquiler,
+    col.color AS nombreColor,
+    COALESCE(sub_inv.stock_total, 0) AS stock,
+    MAX(i.estado) AS estadoProducto, 
+    (
+        SELECT GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',')
+        FROM tblfotosproductos f
+        WHERE f.idProducto = p.idProducto
+    ) AS imagenes
 
-      
-      
-
+FROM tblproductos p
+JOIN tblsubcategoria sc
+    ON p.idSubCategoria = sc.idSubCategoria
+JOIN tblcategoria c
+    ON sc.idCategoria = c.idCategoria
+LEFT JOIN tblprecio pr
+    ON p.idProducto = pr.idProducto
+LEFT JOIN tblproductoscolores pc
+    ON p.idProducto = pc.idProducto
+LEFT JOIN tblcolores col
+    ON pc.idColor = col.idColores
+LEFT JOIN (
+    SELECT
+        i.idProductoColor,
+        SUM(i.stock) AS stock_total
+    FROM tblinventario i
+    GROUP BY i.idProductoColor
+) AS sub_inv
+    ON pc.idProductoColores = sub_inv.idProductoColor
+WHERE LOWER(c.nombre) = LOWER(?)
+GROUP BY 
+    p.idProducto,
+    pc.idProductoColores,
+    pr.precioAlquiler,
+    col.idColores,
+    sub_inv.stock_total;
       `;
 
     const [rows] = await pool.query(sql, [nombreCategoria]);
