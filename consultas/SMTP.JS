@@ -1,59 +1,12 @@
 
-const nodemailer = require("nodemailer");
+const { Resend } = require('resend');
+
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const isProduction = process.env.NODE_ENV === "production";
 
-let transporter;
-let transporterReady = false;
-
-async function initTransporter() {
-  if (transporterReady) return;
-
-  if (isProduction) {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-      throw new Error("Faltan EMAIL_USER o EMAIL_PASSWORD en .env");
-    }
-
-    transporter = nodemailer.createTransport({
-      host: "smtp.hostinger.com",
-      port: 587,
-      secure: false,
-      requireTLS: true,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 10000,
-    });
-  } else {
-  
-    console.log("Modo PRUEBA activado");
-    const testAccount = await nodemailer.createTestAccount();
-    console.log("Usuario Ethereal:", testAccount.user);
-    console.log("Contraseña:", testAccount.pass);
-
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
-  }
-
-  transporterReady = true;
-}
-
-
 async function sendEmail(to, subject, htmlContent, textContent = null) {
- 
-  if (!transporterReady) {
-    await initTransporter();
-  }
 
   if (!to || !subject || !htmlContent) {
     return { success: false, message: "Faltan parámetros" };
@@ -66,25 +19,27 @@ async function sendEmail(to, subject, htmlContent, textContent = null) {
   try {
     const plainText = textContent || htmlContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
-    const mailOptions = {
-      from: `"Alquiladora Romero" <${isProduction ? process.env.EMAIL_USER : 'pruebas@ethereal.email'}>`,
-      to,
+    const fromEmail = isProduction 
+      ? `"Alquiladora Romero" <noreply@alquiladoraromero.com>` 
+      : `"Alquiladora Romero" <pruebas@alquiladoraromero.com>`;
+
+    const data = await resend.emails.send({
+      from: fromEmail,
+      to: [to],
       subject,
       html: htmlContent,
       text: plainText.substring(0, 1000),
-    };
+    });
 
-    const info = await transporter.sendMail(mailOptions);
+    console.log("Email enviado con Resend:", data.id);
 
+    // En desarrollo: simula Ethereal
     if (!isProduction) {
-      const url = nodemailer.getTestMessageUrl(info);
-      console.log("EMAIL DE PRUEBA ENVIADO");
-      console.log("ABRE ESTE ENLACE: ", url);
-      return { success: true, url };
+      console.log("MODO PRUEBA: Email simulado (llegará en producción)");
+      return { success: true, url: "https://resend.com/emails" };
     }
 
-    console.log("Email enviado en producción:", info.messageId);
-    return { success: true, message: "Email enviado" };
+    return { success: true, message: "Email enviado", id: data.id };
 
   } catch (error) {
     console.error("Error al enviar email:", error.message);
