@@ -1262,13 +1262,13 @@ usuarioRouter.post("/validarToken/contrasena", csrfProtection, async (req, res) 
 
     const tokenData = tokenRecords[0];
     console.log("Token data:", tokenData);
-    const expirationDate = new Date(tokenData.fechaExpiracion);
-    const currentTime = new Date(); // UTC
+    const expirationCDMX = new Date(`${tokenData.fechaExpiracion} UTC-6`);
+    const nowCDMX = new Date();
 
-    console.log("Hora actual (UTC):", currentTime.toISOString());
-    console.log("Hora expiración (UTC):", expirationDate.toISOString());
+    console.log("Hora actual (CDMX):", nowCDMX.toLocaleString('es-MX'));
+    console.log("Expiración (CDMX):", expirationCDMX.toLocaleString('es-MX'));
 
-    if (currentTime > expirationDate) {
+    if (nowCDMX > expirationCDMX) {
       return res.status(400).json({ message: "El token ha expirado." });
     }
 
