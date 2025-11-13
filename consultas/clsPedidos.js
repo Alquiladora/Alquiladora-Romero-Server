@@ -40,7 +40,7 @@ routerPedidos.get("/pedidosmanuales/:correo", csrfProtection, async (req, res) =
   const correoUsuario = req.params.correo;
   console.log("Datos de correo elnpoy pedido", correoUsuario)
   try {
-    const [rows] = await poolconnection.pool(
+    const [rows] = await pool.query(
       `
 SELECT
     us.idUsuarios, 
