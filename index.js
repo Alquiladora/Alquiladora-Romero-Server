@@ -77,11 +77,12 @@ app.use(cors({
 app.options('*', cors());
 
 
-app.use(express.json());
+
 
 //=================RUTAS DEFINIDOS=======================
 app.use('/api/tarjetas', tarjetasRouter)
 
+app.use(express.json());
 
 app.use('/api', routers);
 
