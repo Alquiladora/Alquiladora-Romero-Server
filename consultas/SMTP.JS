@@ -19,8 +19,8 @@ async function sendEmail(to, subject, htmlContent, textContent = null) {
   try {
     const plainText = textContent || htmlContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
-  const fromEmail = isProduction 
-  ? `"Alquiladora Romero" <noreply@send.alquiladoraromero.bina5.com>` 
+const fromEmail = isProduction 
+  ? `"Alquiladora Romero" <noreply@alquiladoraromero.bina5.com>` 
   : `"Alquiladora Romero" <pruebas@alquiladoraromero.bina5.com>`;
 
     const data = await resend.emails.send({
