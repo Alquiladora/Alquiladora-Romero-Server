@@ -1244,70 +1244,45 @@ usuarioRouter.post("/desbloquear/:idUsuario", verifyToken, async (req, res) => {
 });
 
 
-usuarioRouter.post( "/validarToken/contrasena",csrfProtection,
-  async (req, res, next) => {
-    try {
-      const { correo, token } = req.body;
-      console.log("Datos recibido ", correo, token);
+usuarioRouter.post("/validarToken/contrasena", csrfProtection, async (req, res) => {
+  try {
+    const { correo, token } = req.body;
+    console.log("Datos recibido:", correo, token);
 
-      if (!correo || !token) {
-        return res
-          .status(400)
-          .json({ message: "Correo o token no proporcionado." });
-      }
-
-      const queryToken =
-        "SELECT * FROM tbltokens WHERE correo = ? AND token = ?";
-      const [tokenRecords] = await pool.query(queryToken, [correo, token]);
-
-      if (!tokenRecords.length) {
-        return res
-          .status(400)
-          .json({ message: "Token inválido o no encontrado." });
-      }
-
-      const tokenData = tokenRecords[0];
-      console.log("Token data", tokenData);
- 
-      const dbDate = tokenData.fechaExpiracion;
-
-     
-      const y = dbDate.getUTCFullYear();
-      const m = (dbDate.getUTCMonth() + 1).toString().padStart(2, '0');
-      const d = dbDate.getUTCDate().toString().padStart(2, '0');
-      const h = dbDate.getUTCHours().toString().padStart(2, '0');
-      const min = dbDate.getUTCMinutes().toString().padStart(2, '0');
-      const s = dbDate.getUTCSeconds().toString().padStart(2, '0');
-
-  
-      const fechaExpiracionString = `${y}-${m}-${d}T${h}:${min}:${s}`;
-      
-      const expirationDate = new Date(fechaExpiracionString);
-      const currentTime = new Date(); 
-
-      console.log("Hora actual (Local):", currentTime.toLocaleString());
-      console.log("Hora expiración (Local):", expirationDate.toLocaleString());
-
-      if (currentTime > expirationDate) {
- 
-        return res.status(400).json({ message: "El token ha expirado." });
-      }
-
-     
-      const deleteTokenQuery =
-        "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
-      await pool.query(deleteTokenQuery, [correo, token]);
-
-      return res.status(200).json({
-        message:
-          "Token válido. Puede proceder con el cambio de contraseña. El token ha sido eliminado.",
-      });
-    } catch (error) {
-      console.error("Error al validar el token:", error);
-      return res.status(500).json({ message: "Error al validar el token." });
+    if (!correo || !token) {
+      return res.status(400).json({ message: "Correo o token no proporcionado." });
     }
+
+    const queryToken = "SELECT * FROM tbltokens WHERE correo = ? AND token = ?";
+    const [tokenRecords] = await pool.query(queryToken, [correo, token]);
+
+    if (!tokenRecords.length) {
+      return res.status(400).json({ message: "Token inválido o no encontrado." });
+    }
+
+    const tokenData = tokenRecords[0];
+    console.log("Token data:", tokenData);
+    const expirationDate = new Date(tokenData.fechaExpiracion);
+    const currentTime = new Date(); // UTC
+
+    console.log("Hora actual (UTC):", currentTime.toISOString());
+    console.log("Hora expiración (UTC):", expirationDate.toISOString());
+
+    if (currentTime > expirationDate) {
+      return res.status(400).json({ message: "El token ha expirado." });
+    }
+
+    const deleteTokenQuery = "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
+    await pool.query(deleteTokenQuery, [correo, token]);
+
+    return res.status(200).json({
+      message: "Token válido. Puede proceder con el cambio de contraseña.",
+    });
+  } catch (error) {
+    console.error("Error al validar el token:", error);
+    return res.status(500).json({ message: "Error al validar el token." });
   }
-);
+});
 
 
 usuarioRouter.post("/verify-password", csrfProtection, verifyToken, async (req, res) => {
