@@ -147,7 +147,7 @@ routerPedidos.post("/crear-pedido-no-cliente", csrfProtection, async (req, res) 
       }
 
       if (params.length > 0) {
-        const [clienteRows] = await poolconnection.pool(query + " LIMIT 1", params);
+        const [clienteRows] = await pool.query(query + " LIMIT 1", params);
         if (clienteRows.length > 0) {
           idCliente = clienteRows[0].id;
         }
