@@ -38,8 +38,12 @@ router.get('/get-csrf-token',csrfProtection , (req, res) => {
   });
 
   Object.entries(routes).forEach(([path, routeHandler]) => {
+  if (path === 'email') {
+    router.use('/emails', routeHandler); 
+  } else {
     router.use(`/${path}`, routeHandler);
-  });
+  }
+});
 
 
 router.use((req, res) => {
