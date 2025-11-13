@@ -1275,8 +1275,10 @@ usuarioRouter.post("/validarToken/contrasena", csrfProtection, async (req, res) 
     const deleteTokenQuery = "DELETE FROM tbltokens WHERE correo = ? AND token = ?";
     await pool.query(deleteTokenQuery, [correo, token]);
 
-    return res.status(200).json({
-      message: "Token válido. Puede proceder con el cambio de contraseña.",
+    return res.status(200).json({ 
+      message: "Token válido", 
+      redirect: true, 
+      correo: correo 
     });
   } catch (error) {
     console.error("Error al validar el token:", error);
