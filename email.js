@@ -1,4 +1,4 @@
-
+// email.js
 const nodemailer = require("nodemailer");
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -6,10 +6,12 @@ const isProduction = process.env.NODE_ENV === "production";
 let transporter;
 let transporterReady = false;
 
+// === INICIALIZAR TRANSPORTER ===
 async function initTransporter() {
   if (transporterReady) return;
 
   if (isProduction) {
+    // === PRODUCCIÓN: Hostinger ===
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
       throw new Error("Faltan EMAIL_USER o EMAIL_PASSWORD en .env");
     }
@@ -28,7 +30,7 @@ async function initTransporter() {
       socketTimeout: 10000,
     });
   } else {
-  
+    // === DESARROLLO: Ethereal ===
     console.log("Modo PRUEBA activado");
     const testAccount = await nodemailer.createTestAccount();
     console.log("Usuario Ethereal:", testAccount.user);
@@ -48,13 +50,14 @@ async function initTransporter() {
   transporterReady = true;
 }
 
-
+// === FUNCIÓN DE ENVÍO (con espera) ===
 async function sendEmail(to, subject, htmlContent, textContent = null) {
- 
+  // Asegurarse de que transporter esté listo
   if (!transporterReady) {
     await initTransporter();
   }
 
+  // Validaciones
   if (!to || !subject || !htmlContent) {
     return { success: false, message: "Faltan parámetros" };
   }
