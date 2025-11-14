@@ -2806,6 +2806,24 @@ routerPedidos.get("/insignias", csrfProtection, verifyToken, async (req, res) =>
 
 
 
+routerPedidos.get("/municipios",verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT municipio 
+      FROM tbldireccioncliente 
+      WHERE municipio IS NOT NULL AND municipio != ''
+      ORDER BY municipio
+    `);
+    const municipios = rows.map(r => r.municipio);
+    res.json(municipios);
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener municipios" });
+  }
+});
+
+
+
+
 
 
 
