@@ -1429,6 +1429,64 @@ routerRepartidorPedidos.get('/repartidor/estadisticas',verifyToken, async (req, 
 });
 
 
+
+
+routerRepartidorPedidos.get('/repartidor/estadistica-movil',verifyToken, async (req, res) => {
+  try {
+     const idUsuario = req.user?.id ; 
+
+    if (!idUsuario) {
+      return res.status(400).json({ error: 'Falta idUsuario en la petición' });
+    }
+
+    const sql = `
+    SELECT
+   
+    (    
+        CAST(SUM(CASE 
+            WHEN P.estadoActual = 'Entregado' 
+            AND A.fechaAsignacion >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) 
+            THEN 1 ELSE 0 
+        END) AS DECIMAL(5,2)) * 100 
+    ) / 
+   
+    NULLIF(SUM(CASE 
+        WHEN A.fechaAsignacion >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) 
+        THEN 1 ELSE 0 
+    END), 0) AS Rendimiento_Mensual_Porcentaje, 
+    (   
+        CAST(SUM(CASE 
+            WHEN P.estadoActual = 'Entregado' 
+            AND A.fechaAsignacion >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) 
+            THEN 1 ELSE 0 
+        END) AS DECIMAL(5,2)) * 100 
+    ) / 
+    NULLIF(SUM(CASE 
+        WHEN A.fechaAsignacion >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) 
+        THEN 1 ELSE 0 
+    END), 0) AS Rendimiento_Semanal_Porcentaje
+FROM
+    tblasignacionpedidos A
+JOIN
+    tblpedidos P ON A.idPedido = P.idPedido
+JOIN
+    tblrepartidores R ON A.idRepartidor = R.idRepartidor 
+WHERE
+    R.idUsuario = ?; 
+    `;
+    const [rows] = await pool.execute(sql, [idUsuario]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron datos para el repartidor' });
+    }
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error en /repartidor/estadisticas-movil:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
+
 //Chacra para movil
 routerRepartidorPedidos.get('/repartidor/pedidos-hoy', verifyToken, async (req, res) => {
   try {
