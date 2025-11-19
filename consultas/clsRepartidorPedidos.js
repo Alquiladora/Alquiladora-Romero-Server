@@ -918,7 +918,11 @@ routerRepartidorPedidos.post("/pedidos/asignar",
     }
   }
 } catch (fcmError) {
-  console.error("Error enviando FCM:", fcmError.errorInfo?.message || fcmError);
+  console.error("Error enviando FCM:", fcmError);
+  if (fcmError.errorInfo?.code === 'messaging/registration-token-not-registered') {
+    await pool.query(`DELETE FROM tblnotificacionmovil WHERE fcmToken = ?`, [fcmToken]);
+    console.log("Token muerto eliminado de la DB");
+  }
 }
         //-------------------------------------
 
