@@ -1,4 +1,4 @@
- require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
@@ -9,19 +9,45 @@ const { init: initSocket } = require('./config/socket');
 //----------------------FIREBASE-----
 const admin = require('firebase-admin');
 
-const serviceAccount = require('./config/firebase-service-account.json')
+let serviceAccount;
+
+
+const serviceAccountJson = process.env.FIREBASE_CREDS;
+
+if (serviceAccountJson) {
+  try {
+ 
+    serviceAccount = JSON.parse(serviceAccountJson);
+    console.log("Credenciales de Firebase cargadas desde Variable de Entorno (Render) ✅");
+  } catch (e) {
+    console.error("ERROR: No se pudo parsear la variable FIREBASE_CREDS.", e);
+ 
+    process.exit(1);
+  }
+} else {
+ 
+  try {
+   
+    serviceAccount = require('./config/firebase-service-account.json');
+    console.log("Credenciales de Firebase cargadas desde archivo local (Desarrollo) 💻");
+  } catch (e) {
+    console.error("FATAL ERROR: El entorno de despliegue (Render) no tiene la variable FIREBASE_CREDS y no se encontró el archivo local. ❌", e.message);
+    process.exit(1);
+  }
+}
+
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
-console.log("Firebase Admin inicializado correctamente 🔥");;
-
+console.log("Firebase Admin inicializado correctamente 🔥");
 
 //=====================RUTAS==========================
 const routers = require('./rutas');
 const connect = require('./connectBd');
 const logger = require('./config/logs')
-const tarjetasRouter= require('./consultas/clsTarjetas')
+const tarjetasRouter = require('./consultas/clsTarjetas')
 
 //==================================================
 
@@ -32,7 +58,7 @@ const port = process.env.PORT || 3001;
 app.use(cookieParser());
 
 app.use(helmet({
- 
+
   hsts: process.env.NODE_ENV === 'production' ? {
     maxAge: 31536000,
     includeSubDomains: true,
@@ -45,14 +71,14 @@ app.use(helmet({
       connectSrc: [
         "'self'",
         ...(process.env.NODE_ENV === 'production' ? [
-          "wss://alquiladora-romero-server.onrender.com", 
+          "wss://alquiladora-romero-server.onrender.com",
           "https://alquiladora-romero-server.onrender.com",
-          "https://alquiladoraromero.bina5.com/"  
+          "https://alquiladoraromero.bina5.com/"
         ] : [
-          "ws://localhost:3001", 
+          "ws://localhost:3001",
           "http://localhost:3001",
           "http://localhost:3000",
-         
+
         ]),
       ],
       scriptSrc: ["'self'"],
@@ -71,7 +97,7 @@ const allowedOrigins = [
   'https://alquiladora-romero-server.onrender.com',
   'http://localhost:3000',
   'https://alquiladoraromero.bina5.com',
-  'https://epiclike-epicyclic-jennifer.ngrok-free.dev' ,
+  'https://epiclike-epicyclic-jennifer.ngrok-free.dev',
 ];
 
 app.use(cors({
@@ -83,7 +109,7 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token','stripe-signature'   ],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'stripe-signature'],
   credentials: true,
 }));
 app.options('*', cors());
@@ -125,18 +151,18 @@ const startServer = async () => {
   try {
     await connect.connect();
     connect.startKeepAlive();
-    logger.info('Conexión a la base de datos establecida', { 
-      db: process.env.DB_NAME || 'unknown' 
+    logger.info('Conexión a la base de datos establecida', {
+      db: process.env.DB_NAME || 'unknown'
     });
     server.listen(port, '0.0.0.0', () => {
-     
+
       const io = initSocket(server);
       logger.info('WebSocket inicializado');
     });
   } catch (error) {
-    logger.error('Fallo al conectar a la base de datos', { 
-      error: error.message, 
-      stack: error.stack 
+    logger.error('Fallo al conectar a la base de datos', {
+      error: error.message,
+      stack: error.stack
     });
     process.exit(1);
   }
