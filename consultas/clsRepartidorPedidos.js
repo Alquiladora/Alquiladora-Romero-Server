@@ -871,6 +871,11 @@ routerRepartidorPedidos.post("/pedidos/asignar",
       await connection.commit();
       //---------------------NOTIFICATION----------------
       try {
+
+        const [userRow] = await pool.query(
+    `SELECT idUsuario FROM tblrepartidores WHERE idRepartidor = ?`,
+    [repartidorId]
+  );
         const [tokenRow] = await pool.query(
           `SELECT fcmToken FROM tblnotificacionmovil 
            WHERE idUsuario = ? AND fcmToken IS NOT NULL 
