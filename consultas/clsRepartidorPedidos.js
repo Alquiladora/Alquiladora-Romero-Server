@@ -880,27 +880,26 @@ routerRepartidorPedidos.post("/pedidos/asignar",
           const fcmToken = tokenRow[0].fcmToken;
           const cantidad = pedidosIds.length;
 
-          const mensaje = {
-            token: fcmToken,
-            notification: {
-              title: cantidad === 1 ? "¡Nuevo pedido asignado!" : `¡${cantidad} nuevos pedidos!`,
-              body: cantidad === 1
-                ? `Pedido #${pedidosIds[0]} listo para recoger`
-                : "Tienes nuevos pedidos asignados",
-            },
-            data: {
-              tipo: "nuevo_pedido",
-              pedidoId: pedidosIds[0].toString(), // el primero, Flutter recargará todos
-            },
-            android: {
-              priority: "high",
-              notification: {
-                channelId: "high_importance_channel",
-                sound: "nuevo_pedido",
-                color: "#00AA00",
-              },
-            },
-          };
+       const mensaje = {
+  token: fcmToken,
+  notification: {
+    title: cantidad === 1 ? "¡Nuevo pedido asignado!" : `¡${cantidad} nuevos pedidos!`,
+    body: cantidad === 1 ? `Pedido #${pedidosIds[0]} listo para recoger` : "Tienes nuevos pedidos asignados",
+  },
+  data: {
+    tipo: "nuevo_pedido",
+    pedidoId: pedidosIds[0].toString(),
+  },
+  android: {
+    priority: "high",
+    notification: {
+      channelId: "high_importance_channel",  
+      sound: "nuevo_pedido",
+      color: "#00AA00",
+      clickAction: "FLUTTER_NOTIFICATION_CLICK"
+    }
+  }
+};
 
           await admin.messaging().send(mensaje);
           console.log(`Notificación enviada al repartidor ${repartidorId} (${cantidad} pedidos)`);
