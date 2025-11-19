@@ -796,12 +796,12 @@ routerRepartidorPedidos.post("/pedidos/asignar",
   csrfProtection,
   async (req, res) => {
     const { repartidorId, pedidosIds } = req.body;
-    const userId = req.user?.id;
+   
 
     console.log("Datos recibidos para asignación:", {
       repartidorId,
       pedidosIds,
-      userId
+    
     });
 
     if (
@@ -873,65 +873,70 @@ routerRepartidorPedidos.post("/pedidos/asignar",
       try {
 
         const [userRow] = await pool.query(
-    `SELECT idUsuario FROM tblrepartidores WHERE idRepartidor = ?`,
-    [repartidorId]
-  );
-        const [tokenRow] = await pool.query(
-          `SELECT fcmToken FROM tblnotificacionmovil 
-           WHERE idUsuario = ? AND fcmToken IS NOT NULL 
-           LIMIT 1`,
-          [userId]
+          `SELECT idUsuario FROM tblrepartidores WHERE idRepartidor = ?`,
+          [repartidorId]
         );
+        if (!userRow.length || !userRow[0].idUsuario) {
+          console.log(`Repartidor ${repartidorId} no tiene idUsuario asociado`);
+        } else {
+          const idUsuario = userRow[0].idUsuario;
 
-        if (tokenRow.length > 0 && tokenRow[0].fcmToken) {
-          const fcmToken = tokenRow[0].fcmToken;
-          const cantidad = pedidosIds.length;
+          const [tokenRow] = await pool.query(
+            `SELECT fcmToken FROM tblnotificacionmovil WHERE idUsuario = ? AND fcmToken IS NOT NULL LIMIT 1`,
+            [idUsuario]
+          );
 
-       const mensaje = {
-  token: fcmToken,
-  notification: {
-    title: cantidad === 1 ? "¡Nuevo pedido asignado!" : `¡${cantidad} nuevos pedidos!`,
-    body: cantidad === 1 ? `Pedido #${pedidosIds[0]} listo para recoger` : "Tienes nuevos pedidos asignados",
-  },
-  data: {
-    tipo: "nuevo_pedido",
-    pedidoId: pedidosIds[0].toString(),
-  },
-  android: {
-    priority: "high",
-    notification: {
-      channelId: "high_importance_channel",  
-      sound: "nuevo_pedido",
-      color: "#00AA00",
-      clickAction: "FLUTTER_NOTIFICATION_CLICK"
+          if (tokenRow.length > 0 && tokenRow[0].fcmToken) {
+            const fcmToken = tokenRow[0].fcmToken;
+            const cantidad = pedidosIds.length;
+
+            const mensaje = {
+              token: fcmToken,
+              notification: {
+                title: cantidad === 1 ? "¡Nuevo pedido asignado!" : `¡${cantidad} nuevos pedidos!`,
+                body: cantidad === 1 ? `Pedido #${pedidosIds[0]} listo para recoger` : "Tienes nuevos pedidos asignados",
+              },
+              data: {
+                tipo: "nuevo_pedido",
+                pedidoId: pedidosIds[0].toString(),
+              },
+              android: {
+                priority: "high",
+                notification: {
+                  channelId: "high_importance_channel",
+                  sound: "nuevo_pedido",
+                  color: "#00AA00",
+                  clickAction: "FLUTTER_NOTIFICATION_CLICK"
+                }
+              }
+            };
+
+         const response = await admin.messaging().send(mensaje);
+      console.log(`Notificación enviada al repartidor ${repartidorId} (idUsuario: ${idUsuario})`, response);
+    } else {
+      console.log(`No hay token FCM para idUsuario ${idUsuario}`);
     }
   }
-};
+} catch (fcmError) {
+  console.error("Error enviando FCM:", fcmError.errorInfo?.message || fcmError);
+}
+        //-------------------------------------
 
-          await admin.messaging().send(mensaje);
-          console.log(`Notificación enviada al repartidor ${repartidorId} (${cantidad} pedidos)`);
-        }
-      } catch (fcmError) {
-        console.error("Error enviando FCM (no rompe la asignación):", fcmError);
-       
+        res.status(201).json({
+          success: true,
+          message: "Pedidos asignados y notificación enviada correctamente.",
+        });
+      } catch (error) {
+        await connection.rollback();
+        console.error("Error al asignar pedidos:", error);
+        res.status(500).json({
+          success: false,
+          message: "Error interno del servidor al asignar los pedidos.",
+        });
+      } finally {
+        connection.release();
       }
-      //-------------------------------------
-
-      res.status(201).json({
-        success: true,
-        message: "Pedidos asignados y notificación enviada correctamente.",
-      });
-    } catch (error) {
-      await connection.rollback();
-      console.error("Error al asignar pedidos:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error interno del servidor al asignar los pedidos.",
-      });
-    } finally {
-      connection.release();
     }
-  }
 );
 
 
