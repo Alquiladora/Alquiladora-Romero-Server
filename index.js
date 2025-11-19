@@ -5,6 +5,18 @@ const cookieParser = require('cookie-parser');
 const cors = require("cors");
 const http = require('http');
 const { init: initSocket } = require('./config/socket');
+
+//----------------------FIREBASE-----
+const admin = require('firebase-admin');
+
+const serviceAccount = require('./config/firebase-service-account.json')
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+console.log("Firebase Admin inicializado correctamente 🔥");;
+
+
 //=====================RUTAS==========================
 const routers = require('./rutas');
 const connect = require('./connectBd');

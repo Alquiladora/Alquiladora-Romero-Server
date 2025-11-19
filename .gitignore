@@ -35,3 +35,7 @@ Thumbs.db
 
 # Ignorar dependencias
 /node_modules/
+
+
+# Firebase Admin credential
+config/firebase-service-account.json

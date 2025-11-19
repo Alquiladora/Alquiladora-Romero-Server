@@ -14,6 +14,7 @@ const { listeners } = require("process");
 const { route } = require("./clssesiones");
 const { obtenerFechaMexico } = require("./clsUsuarios");
 const { verifyToken } = require("./clsUsuarios");
+const admin = require('firebase-admin');
 
 function todayMx() {
   return moment.tz("America/Mexico_City").startOf("day");
@@ -84,21 +85,21 @@ async function countByDate(date) {
 }
 
 async function getEntregaReal(fechaInicio, fechaRegistro) {
- 
+
 
   const inicio = moment(fechaInicio).tz("America/Mexico_City").startOf("day");
 
   const registro = moment.tz(fechaRegistro, "America/Mexico_City").startOf("day");
   const today = todayMx();
   const dia = inicio.day();
-   console.log("getEntregaReal:", { fechaInicio, fechaRegistro, today: today.format("YYYY-MM-DD") });
+  console.log("getEntregaReal:", { fechaInicio, fechaRegistro, today: today.format("YYYY-MM-DD") });
 
   if (inicio.isSame(registro, "day") && inicio.isSame(today, "day")) {
     return today;
   }
   const isUrgent = registro.isSame(today, "day");
   if (isUrgent) return today;
- 
+
 
   if (dia >= 2 && dia <= 6) {
     return moment(inicio).subtract(1, "day");
@@ -302,7 +303,7 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
       message: "Error interno al consultar pedidos",
     });
   }
-  });
+});
 
 
 
@@ -310,9 +311,9 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
 
 
 
-  routerRepartidorPedidos.get("/wearOs/repartidores", async (req, res) => {
-    try {
-      const sql = `
+routerRepartidorPedidos.get("/wearOs/repartidores", async (req, res) => {
+  try {
+    const sql = `
         SELECT
           u.idUsuarios,
           u.nombre,
@@ -327,35 +328,35 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
         ORDER BY u.nombre, u.apellidoP;
       `;
 
-      const [rows] = await pool.query(sql);
+    const [rows] = await pool.query(sql);
 
-      // Si no hay repartidores activos, devolvemos array vacío
-      if (!rows.length) {
-        return res.status(200).json({ success: true, repartidores: [] });
-      }
-
-      // Respondemos con la lista de repartidores
-      return res.status(200).json({
-        success: true,
-        repartidores: rows,
-      });
-    } catch (error) {
-      console.error("Error al obtener repartidores activos:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Error interno del servidor",
-      });
+    // Si no hay repartidores activos, devolvemos array vacío
+    if (!rows.length) {
+      return res.status(200).json({ success: true, repartidores: [] });
     }
-  });
 
-  //Obtener los repartidores para compenenete gestios repartidore
+    // Respondemos con la lista de repartidores
+    return res.status(200).json({
+      success: true,
+      repartidores: rows,
+    });
+  } catch (error) {
+    console.error("Error al obtener repartidores activos:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error interno del servidor",
+    });
+  }
+});
 
-  routerRepartidorPedidos.get("/administrar/repartidores",
-    verifyToken,
-    csrfProtection,
-    async (req, res) => {
-      try {
-        const [rows] = await pool.query(`
+//Obtener los repartidores para compenenete gestios repartidore
+
+routerRepartidorPedidos.get("/administrar/repartidores",
+  verifyToken,
+  csrfProtection,
+  async (req, res) => {
+    try {
+      const [rows] = await pool.query(`
       SELECT 
     r.idRepartidor,
     u.nombre,
@@ -429,48 +430,48 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
   LEFT JOIN tblperfilusuarios pu ON u.idUsuarios = pu.idUsuarios;
 
       `);
-        const repartidores = rows.map((r) => ({
-          idRepartidor: r.idRepartidor,
-          nombre: `${r.nombre} ${r.apellidoP} ${r.apellidoM}`,
-          correo: r.correo,
-          telefono: r.telefono,
-          rol: r.rol,
-          estado: r.estado === 1 ? "activo" : "inactivo",
-          fechaAlta: r.fechaAlta ? new Date(r.fechaAlta).toISOString() : null,
-          fechaBaja: r.fechaBaja ? new Date(r.fechaBaja).toISOString() : null,
-          fechaCreacion: r.fechaCreacion
-            ? new Date(r.fechaCreacion).toISOString()
-            : null,
-          fotoPerfil: r.fotoPerfil || null,
-          pedidosFinalizados: r.pedidosFinalizados || 0,
-          pedidosEnviando: r.pedidosEnviando || 0,
-          pedidosIncompleto: r.pedidosIncompleto || 0,
-          pedidosIncidente: r.pedidosIncidente || 0,
-          pedidosRecogiendo: r.pedidosRecogiendo|| 0,
-          pedidosCancelado: r.pedidosCancelado || 0,
-          calificacionPromedio: r.calificacionPromedio || null,
-        }));
+      const repartidores = rows.map((r) => ({
+        idRepartidor: r.idRepartidor,
+        nombre: `${r.nombre} ${r.apellidoP} ${r.apellidoM}`,
+        correo: r.correo,
+        telefono: r.telefono,
+        rol: r.rol,
+        estado: r.estado === 1 ? "activo" : "inactivo",
+        fechaAlta: r.fechaAlta ? new Date(r.fechaAlta).toISOString() : null,
+        fechaBaja: r.fechaBaja ? new Date(r.fechaBaja).toISOString() : null,
+        fechaCreacion: r.fechaCreacion
+          ? new Date(r.fechaCreacion).toISOString()
+          : null,
+        fotoPerfil: r.fotoPerfil || null,
+        pedidosFinalizados: r.pedidosFinalizados || 0,
+        pedidosEnviando: r.pedidosEnviando || 0,
+        pedidosIncompleto: r.pedidosIncompleto || 0,
+        pedidosIncidente: r.pedidosIncidente || 0,
+        pedidosRecogiendo: r.pedidosRecogiendo || 0,
+        pedidosCancelado: r.pedidosCancelado || 0,
+        calificacionPromedio: r.calificacionPromedio || null,
+      }));
 
-        res.status(200).json({ success: true, data: repartidores });
-      } catch (error) {
-        console.error("❌ Error al obtener repartidores:", error);
-        res.status(500).json({
-          success: false,
-          message: "Error interno al obtener repartidores",
-          error: error.message,
-        });
-      }
+      res.status(200).json({ success: true, data: repartidores });
+    } catch (error) {
+      console.error("❌ Error al obtener repartidores:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno al obtener repartidores",
+        error: error.message,
+      });
     }
-  );
+  }
+);
 
-  //Enpoit para editar estado de repartidor para 0/ 1
-  routerRepartidorPedidos.patch("/administrar/repartidores/:id/estado",
-    async (req, res) => {
-      const { id } = req.params;
-      const { activo } = req.body;
+//Enpoit para editar estado de repartidor para 0/ 1
+routerRepartidorPedidos.patch("/administrar/repartidores/:id/estado",
+  async (req, res) => {
+    const { id } = req.params;
+    const { activo } = req.body;
 
-      try {
-        const [pedidosActivos] = await pool.query(
+    try {
+      const [pedidosActivos] = await pool.query(
         `SELECT p.estadoActual 
         FROM tblpedidos p
         JOIN tblasignacionpedidos ap ON p.idPedido = ap.idPedido
@@ -488,50 +489,50 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
 
 
 
-        let fechaBaja = null;
-        if (activo === 0) {
-          fechaBaja = moment()
-            .tz("America/Mexico_City")
-            .format("YYYY-MM-DD HH:mm:ss");
-        }
-        await pool.query(
-          "UPDATE tblrepartidores SET activo = ?, fechaBaja = ? WHERE idRepartidor = ?",
-          [activo, fechaBaja, id]
-        );
-
-        res.json({
-          success: true,
-          estado: activo === 1 ? "activo" : "inactivo",
-          fechaBaja,
-        });
-      } catch (error) {
-        res
-          .status(500)
-          .json({ success: false, message: "Error al actualizar estado", error });
+      let fechaBaja = null;
+      if (activo === 0) {
+        fechaBaja = moment()
+          .tz("America/Mexico_City")
+          .format("YYYY-MM-DD HH:mm:ss");
       }
+      await pool.query(
+        "UPDATE tblrepartidores SET activo = ?, fechaBaja = ? WHERE idRepartidor = ?",
+        [activo, fechaBaja, id]
+      );
+
+      res.json({
+        success: true,
+        estado: activo === 1 ? "activo" : "inactivo",
+        fechaBaja,
+      });
+    } catch (error) {
+      res
+        .status(500)
+        .json({ success: false, message: "Error al actualizar estado", error });
     }
-  );
+  }
+);
 
-  //Obtener detalles del pedido
+//Obtener detalles del pedido
 
 
-  routerRepartidorPedidos.get("/repartidores/:repartidorId/historial",
-    verifyToken,
-    async (req, res) => {
-      const { repartidorId } = req.params;
+routerRepartidorPedidos.get("/repartidores/:repartidorId/historial",
+  verifyToken,
+  async (req, res) => {
+    const { repartidorId } = req.params;
 
-      // Validar que repartidorId sea un número entero positivo
-      if (!/^\d+$/.test(repartidorId)) {
-        return res.status(400).json({
-          success: false,
-          message: "El ID del repartidor debe ser un número entero positivo.",
-        });
-      }
+    // Validar que repartidorId sea un número entero positivo
+    if (!/^\d+$/.test(repartidorId)) {
+      return res.status(400).json({
+        success: false,
+        message: "El ID del repartidor debe ser un número entero positivo.",
+      });
+    }
 
-      try {
-        // Consulta optimizada para obtener todos los pedidos asignados al repartidor
-        const [rows] = await pool.query(
-          `
+    try {
+      // Consulta optimizada para obtener todos los pedidos asignados al repartidor
+      const [rows] = await pool.query(
+        `
           SELECT 
             ap.idAsignacion,
             ap.fechaAsignacion,
@@ -604,123 +605,123 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
             colorProducto
           ORDER BY p.FechaA DESC
           `,
-          [repartidorId]
-        );
+        [repartidorId]
+      );
 
-        console.log("Resultado del endpoint historial de pedidos:", rows);
+      console.log("Resultado del endpoint historial de pedidos:", rows);
 
-        // Agrupar los resultados por pedido para evitar duplicados
-        const pedidosMap = new Map();
+      // Agrupar los resultados por pedido para evitar duplicados
+      const pedidosMap = new Map();
 
-        for (const row of rows) {
-          const {
+      for (const row of rows) {
+        const {
+          idAsignacion,
+          fechaAsignacion,
+          idPedido,
+          idRastreo,
+          idUsuarios,
+          idNoClientes,
+          idDireccion,
+          fechaInicio,
+          fechaEntrega,
+          horaAlquiler,
+          detallesPago,
+          totalPagar,
+          fechaRegistro,
+          fechaPedido,
+          tipoPedido,
+          estadoActual,
+          clienteNombre,
+          clienteCorreo,
+          clienteTelefono,
+          totalPagado,
+          idDetalle,
+          cantidad,
+          precioUnitario,
+          subtotal,
+          estadoProducto,
+          observaciones,
+          diasAlquiler,
+          nombreProducto,
+          detallesProducto,
+          colorProducto,
+        } = row;
+
+        if (!pedidosMap.has(idPedido)) {
+          pedidosMap.set(idPedido, {
             idAsignacion,
-            fechaAsignacion,
             idPedido,
             idRastreo,
             idUsuarios,
             idNoClientes,
             idDireccion,
+            fechaAsignacion,
             fechaInicio,
             fechaEntrega,
             horaAlquiler,
             detallesPago,
             totalPagar,
+            totalPagado,
             fechaRegistro,
             fechaPedido,
             tipoPedido,
             estadoActual,
-            clienteNombre,
-            clienteCorreo,
-            clienteTelefono,
-            totalPagado,
-            idDetalle,
-            cantidad,
-            precioUnitario,
-            subtotal,
-            estadoProducto,
-            observaciones,
-            diasAlquiler,
-            nombreProducto,
-            detallesProducto,
-            colorProducto,
-          } = row;
-
-          if (!pedidosMap.has(idPedido)) {
-            pedidosMap.set(idPedido, {
-              idAsignacion,
-              idPedido,
-              idRastreo,
-              idUsuarios,
-              idNoClientes,
-              idDireccion,
-              fechaAsignacion,
-              fechaInicio,
-              fechaEntrega,
-              horaAlquiler,
-              detallesPago,
-              totalPagar,
-              totalPagado,
-              fechaRegistro,
-              fechaPedido,
-              tipoPedido,
-              estadoActual,
-              cliente: {
-                nombre: clienteNombre || "Sin nombre",
-                correo: clienteCorreo || "Sin correo",
-                telefono: clienteTelefono || "Sin teléfono",
-              },
-              productos: [],
-            });
-          }
-
-          // Agregar productos solo si existen (evitar null/undefined)
-          if (idDetalle) {
-            pedidosMap.get(idPedido).productos.push({
-              idDetalle,
-              nombreProducto: nombreProducto || "Sin nombre",
-              detallesProducto: detallesProducto || null,
-              colorProducto: colorProducto || null,
-              cantidad: cantidad || 0,
-              precioUnitario: parseFloat(precioUnitario) || 0,
-              subtotal: parseFloat(subtotal) || 0,
-              estadoProducto: estadoProducto || "N/A",
-              observaciones: observaciones || null,
-              diasAlquiler: diasAlquiler || 0,
-            });
-          }
+            cliente: {
+              nombre: clienteNombre || "Sin nombre",
+              correo: clienteCorreo || "Sin correo",
+              telefono: clienteTelefono || "Sin teléfono",
+            },
+            productos: [],
+          });
         }
 
-        // Convertir el Map a un array
-        const historial = Array.from(pedidosMap.values());
-
-        // Responder con el historial
-        res.status(200).json({
-          success: true,
-          total: historial.length,
-          data: historial,
-        });
-      } catch (error) {
-        console.error("❌ Error al obtener historial del repartidor:", error);
-        res.status(500).json({
-          success: false,
-          message: "Error al obtener el historial de pedidos del repartidor.",
-          error: error.message,
-        });
+        // Agregar productos solo si existen (evitar null/undefined)
+        if (idDetalle) {
+          pedidosMap.get(idPedido).productos.push({
+            idDetalle,
+            nombreProducto: nombreProducto || "Sin nombre",
+            detallesProducto: detallesProducto || null,
+            colorProducto: colorProducto || null,
+            cantidad: cantidad || 0,
+            precioUnitario: parseFloat(precioUnitario) || 0,
+            subtotal: parseFloat(subtotal) || 0,
+            estadoProducto: estadoProducto || "N/A",
+            observaciones: observaciones || null,
+            diasAlquiler: diasAlquiler || 0,
+          });
+        }
       }
+
+      // Convertir el Map a un array
+      const historial = Array.from(pedidosMap.values());
+
+      // Responder con el historial
+      res.status(200).json({
+        success: true,
+        total: historial.length,
+        data: historial,
+      });
+    } catch (error) {
+      console.error("❌ Error al obtener historial del repartidor:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error al obtener el historial de pedidos del repartidor.",
+        error: error.message,
+      });
     }
-  );
+  }
+);
 
 
 
 
-  //==================================================MODULO DE ASIGANCION DE PEDIDOS============
-  //Repartidores con activo ===1
-  routerRepartidorPedidos.get("/administrar/activos/repartidores",
-    csrfProtection,
-    async (req, res) => {
-      try {
-        const [rows] = await pool.query(`
+//==================================================MODULO DE ASIGANCION DE PEDIDOS============
+//Repartidores con activo ===1
+routerRepartidorPedidos.get("/administrar/activos/repartidores",
+  csrfProtection,
+  async (req, res) => {
+    try {
+      const [rows] = await pool.query(`
         SELECT 
           r.idRepartidor,
           u.nombre,
@@ -757,397 +758,435 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
 
       `);
 
-        const repartidores = rows.map((r) => ({
-          idRepartidor: r.idRepartidor,
-          nombre: `${r.nombre} ${r.apellidoP} ${r.apellidoM}`,
-          correo: r.correo,
-          telefono: r.telefono,
-          estado: r.estado === 1 ? "activo" : "inactivo",
-          fechaAlta: r.fechaAlta ? new Date(r.fechaAlta).toISOString() : null,
-          fechaBaja: r.fechaBaja ? new Date(r.fechaBaja).toISOString() : null,
-          fechaCreacion: r.fechaCreacion
-            ? new Date(r.fechaCreacion).toISOString()
-            : null,
-          fotoPerfil: r.fotoPerfil || null,
-          pedidosFinalizados: r.pedidosFinalizados || 0,
-          pedidosEnviando: r.pedidosEnviando || 0,
-          pedidosIncompleto: r.pedidosIncompleto || 0,
-          pedidosIncidente: r.pedidosIncidente || 0,
-          pedidosRecogiendo: r.pedidosRecogiendo|| 0,
-          pedidosCancelado: r.pedidosCancelado || 0,
-          calificacionPromedio: r.calificacionPromedio || null,
-        }));
+      const repartidores = rows.map((r) => ({
+        idRepartidor: r.idRepartidor,
+        nombre: `${r.nombre} ${r.apellidoP} ${r.apellidoM}`,
+        correo: r.correo,
+        telefono: r.telefono,
+        estado: r.estado === 1 ? "activo" : "inactivo",
+        fechaAlta: r.fechaAlta ? new Date(r.fechaAlta).toISOString() : null,
+        fechaBaja: r.fechaBaja ? new Date(r.fechaBaja).toISOString() : null,
+        fechaCreacion: r.fechaCreacion
+          ? new Date(r.fechaCreacion).toISOString()
+          : null,
+        fotoPerfil: r.fotoPerfil || null,
+        pedidosFinalizados: r.pedidosFinalizados || 0,
+        pedidosEnviando: r.pedidosEnviando || 0,
+        pedidosIncompleto: r.pedidosIncompleto || 0,
+        pedidosIncidente: r.pedidosIncidente || 0,
+        pedidosRecogiendo: r.pedidosRecogiendo || 0,
+        pedidosCancelado: r.pedidosCancelado || 0,
+        calificacionPromedio: r.calificacionPromedio || null,
+      }));
 
-        res.status(200).json({ success: true, data: repartidores });
-      } catch (error) {
-        console.error("❌ Error al obtener repartidores:", error);
-        res.status(500).json({
-          success: false,
-          message: "Error interno al obtener repartidores",
-          error: error.message,
-        });
-      }
+      res.status(200).json({ success: true, data: repartidores });
+    } catch (error) {
+      console.error("❌ Error al obtener repartidores:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno al obtener repartidores",
+        error: error.message,
+      });
     }
-  );
+  }
+);
 
-  routerRepartidorPedidos.post("/pedidos/asignar",
-    verifyToken,
-    csrfProtection,
-    async (req, res) => {
-      const { repartidorId, pedidosIds } = req.body;
+routerRepartidorPedidos.post("/pedidos/asignar",
+  verifyToken,
+  csrfProtection,
+  async (req, res) => {
+    const { repartidorId, pedidosIds } = req.body;
 
-      console.log("Datos recibidos para asignación:", {
-        repartidorId,
-        pedidosIds,
+    console.log("Datos recibidos para asignación:", {
+      repartidorId,
+      pedidosIds,
+    });
+
+    if (
+      !repartidorId ||
+      !Array.isArray(pedidosIds) ||
+      pedidosIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Faltan datos obligatorios para la asignación (repartidorId, pedidosIds).",
+      });
+    }
+
+    const fechaAsignacion = obtenerFechaMexico();
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+
+      const [currentStates] = await connection.query(
+        `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido IN (?)`,
+        [pedidosIds]
+      );
+
+      const stateMap = currentStates.reduce((acc, row) => {
+        acc[row.idPedido] = row.estadoActual;
+        return acc;
+      }, {});
+
+      const updateValues = pedidosIds.map((idPedido) => {
+        const currentState = stateMap[idPedido] || "Confirmado";
+        let newState;
+        if (currentState === "Confirmado") {
+          newState = "Enviando";
+        } else if (currentState === "En alquiler") {
+          newState = "Recogiendo";
+        } else {
+          newState = currentState;
+        }
+        return [idPedido, newState, fechaAsignacion];
       });
 
-      if (
-        !repartidorId ||
-        !Array.isArray(pedidosIds) ||
-        pedidosIds.length === 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Faltan datos obligatorios para la asignación (repartidorId, pedidosIds).",
-        });
-      }
 
-      const fechaAsignacion = obtenerFechaMexico();
-
-      const connection = await pool.getConnection();
-
-      try {
-        await connection.beginTransaction();
-
-      
-        const [currentStates] = await connection.query(
-          `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido IN (?)`,
-          [pedidosIds]
-        );
-
-        const stateMap = currentStates.reduce((acc, row) => {
-          acc[row.idPedido] = row.estadoActual;
-          return acc;
-        }, {});
-
-        const updateValues = pedidosIds.map((idPedido) => {
-          const currentState = stateMap[idPedido] || "Confirmado"; 
-          let newState;
-          if (currentState === "Confirmado") {
-            newState = "Enviando";
-          } else if (currentState === "En alquiler") {
-            newState = "Recogiendo";
-          } else {
-            newState = currentState;
-          }
-          return [idPedido, newState, fechaAsignacion];
-        });
-
-      
-        const updateQuery = `
+      const updateQuery = `
           UPDATE tblpedidos 
           SET estadoActual = ?, FechaA = ? 
           WHERE idPedido = ?
         `;
-        for (const [idPedido, newState, fecha] of updateValues) {
-          await connection.query(updateQuery, [newState, fecha, idPedido]);
-        }
-
-      
-        const insertValues = pedidosIds.map((idPedido) => [
-          idPedido,
-          repartidorId,
-          fechaAsignacion,
-        ]);
-        await connection.query(
-          `INSERT INTO tblasignacionpedidos (idPedido, idRepartidor, fechaAsignacion) VALUES ?`,
-          [insertValues]
-        );
-
-        await connection.commit();
-
-        res.status(201).json({
-          success: true,
-          message: "Pedidos asignados y actualizados correctamente.",
-        });
-      } catch (error) {
-        await connection.rollback();
-        console.error("❌ Error al asignar pedidos:", error);
-
-        res.status(500).json({
-          success: false,
-          message: "Error interno del servidor al asignar los pedidos.",
-          error: error.message,
-          code: error.code || "UNKNOWN",
-        });
-      } finally {
-        if (connection) {
-          connection.release();
-        }
-      }
-    }
-  );
-
-
-  //Checar movil
-  //Enpoit para cancelar pedido
-  routerRepartidorPedidos.put("/pedidos/:id",verifyToken, csrfProtection,
-    async (req, res) => {
-      const { id } = req.params;
-      const { estadoActual } = req.body;
-
-      console.log("Datos recibidos", id, estadoActual)
-      if (estadoActual !== "Cancelado") {
-        return res.status(400).json({
-          success: false,
-          message: "El estado debe ser 'Cancelado' para esta operación.",
-        });
+      for (const [idPedido, newState, fecha] of updateValues) {
+        await connection.query(updateQuery, [newState, fecha, idPedido]);
       }
 
-      const connection = await pool.getConnection();
 
+      const insertValues = pedidosIds.map((idPedido) => [
+        idPedido,
+        repartidorId,
+        fechaAsignacion,
+      ]);
+      await connection.query(
+        `INSERT INTO tblasignacionpedidos (idPedido, idRepartidor, fechaAsignacion) VALUES ?`,
+        [insertValues]
+      );
+
+      await connection.commit();
+      //---------------------NOTIFICATION----------------
       try {
-        await connection.beginTransaction();
-
-        // Verificar si el pedido existe
-        const [existingPedido] = await connection.query(
-          `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?`,
-          [id]
+        const [tokenRow] = await pool.query(
+          `SELECT fcmToken FROM tblnotificacionmovil 
+           WHERE idUsuario = ? AND fcmToken IS NOT NULL 
+           LIMIT 1`,
+          [repartidorId]
         );
 
-        if (existingPedido.length === 0) {
-          await connection.rollback();
-          return res.status(404).json({
-            success: false,
-            message: "Pedido no encontrado.",
-          });
+        if (tokenRow.length > 0 && tokenRow[0].fcmToken) {
+          const fcmToken = tokenRow[0].fcmToken;
+          const cantidad = pedidosIds.length;
+
+          const mensaje = {
+            token: fcmToken,
+            notification: {
+              title: cantidad === 1 ? "¡Nuevo pedido asignado!" : `¡${cantidad} nuevos pedidos!`,
+              body: cantidad === 1
+                ? `Pedido #${pedidosIds[0]} listo para recoger`
+                : "Tienes nuevos pedidos asignados",
+            },
+            data: {
+              tipo: "nuevo_pedido",
+              pedidoId: pedidosIds[0].toString(), // el primero, Flutter recargará todos
+            },
+            android: {
+              priority: "high",
+              notification: {
+                channelId: "high_importance_channel",
+                sound: "nuevo_pedido",
+                color: "#00AA00",
+              },
+            },
+          };
+
+          await admin.messaging().send(mensaje);
+          console.log(`Notificación enviada al repartidor ${repartidorId} (${cantidad} pedidos)`);
         }
-
-        const pedido = existingPedido[0];
-        if (pedido.estadoActual === "Cancelado") {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: "El pedido ya está cancelado.",
-          });
-        }
-
-        // Obtener los detalles de los productos asociados al pedido, excluyendo los ya cancelados
-        const [pedidoDetalles] = await connection.query(
-          `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
-          [id]
-        );
-
-        // Actualizar el inventario para cada producto
-        for (const detalle of pedidoDetalles) {
-          const { idProductoColores, cantidad } = detalle;
-
-          // Verificar si el producto existe en el inventario
-          const [inventario] = await connection.query(
-            `SELECT stock, stockReal FROM tblinventario WHERE idProductoColor = ? AND estado = 'Activo'`,
-            [idProductoColores]
-          );
-
-          if (inventario.length === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-              success: false,
-              message: `Producto con idProductoColores ${idProductoColores} no encontrado en el inventario.`,
-            });
-          }
-
-          const { stock, stockReal } = inventario[0];
-
-          // Validar que el nuevo stock no exceda stockReal
-          const newStock = stock + cantidad;
-          if (newStock > stockReal) {
-            await connection.rollback();
-            return res.status(400).json({
-              success: false,
-              message: `La devolución de ${cantidad} unidades para el producto con idProductoColores ${idProductoColores} excede el stock real (${stockReal}).`,
-            });
-          }
-
-          // Actualizar el stock (solo stock, no stockReservado)
-          await connection.query(
-            `UPDATE tblinventario SET stock = ? WHERE idProductoColor = ?`,
-            [newStock, idProductoColores]
-          );
-
-        
-      
-        }
-
-        // Actualizar el estado del pedido
-        const fechaModificacion = obtenerFechaMexico();
-        await connection.query(
-          `UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?`,
-          [estadoActual, fechaModificacion, id]
-        );
-
-        // Eliminar la asignación del pedido (si aplica)
-        // await connection.query(
-        //   `DELETE FROM tblasignacionpedidos WHERE idPedido = ?`,
-        //   [id]
-        // );
-
-        await connection.commit();
-
-        res.status(200).json({
-          success: true,
-          message: "Pedido cancelado exitosamente y productos devueltos al inventario.",
-          data: { id, estadoActual },
-        });
-      } catch (error) {
-        await connection.rollback();
-        console.error("❌ Error al cancelar el pedido:", error);
-        res.status(500).json({
-          success: false,
-          message: "Error interno del servidor al cancelar el pedido.",
-          error: error.message,
-          code: error.code || "UNKNOWN",
-        });
-      } finally {
-        if (connection) {
-          connection.release();
-        }
+      } catch (fcmError) {
+        console.error("Error enviando FCM (no rompe la asignación):", fcmError);
+       
       }
+      //-------------------------------------
+
+      res.status(201).json({
+        success: true,
+        message: "Pedidos asignados y notificación enviada correctamente.",
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error("Error al asignar pedidos:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno del servidor al asignar los pedidos.",
+      });
+    } finally {
+      connection.release();
     }
-  );
+  }
+);
 
-  //enpoit de cancelar movil
-  routerRepartidorPedidos.put("/pedidos-movil/:id",verifyToken,
-    async (req, res) => {
-      const { id } = req.params;
-      const { estadoActual } = req.body;
 
-      console.log("Datos recibidos", id, estadoActual)
-      if (estadoActual !== "Cancelado") {
-        return res.status(400).json({
-          success: false,
-          message: "El estado debe ser 'Cancelado' para esta operación.",
-        });
-      }
+//Checar movil
+//Enpoit para cancelar pedido
+routerRepartidorPedidos.put("/pedidos/:id", verifyToken, csrfProtection,
+  async (req, res) => {
+    const { id } = req.params;
+    const { estadoActual } = req.body;
 
-      const connection = await pool.getConnection();
-
-      try {
-        await connection.beginTransaction();
-
-        // Verificar si el pedido existe
-        const [existingPedido] = await connection.query(
-          `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?`,
-          [id]
-        );
-
-        if (existingPedido.length === 0) {
-          await connection.rollback();
-          return res.status(404).json({
-            success: false,
-            message: "Pedido no encontrado.",
-          });
-        }
-
-        const pedido = existingPedido[0];
-        if (pedido.estadoActual === "Cancelado") {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: "El pedido ya está cancelado.",
-          });
-        }
-
-        // Obtener los detalles de los productos asociados al pedido, excluyendo los ya cancelados
-        const [pedidoDetalles] = await connection.query(
-          `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
-          [id]
-        );
-
-        // Actualizar el inventario para cada producto
-        for (const detalle of pedidoDetalles) {
-          const { idProductoColores, cantidad } = detalle;
-
-          // Verificar si el producto existe en el inventario
-          const [inventario] = await connection.query(
-            `SELECT stock, stockReal FROM tblinventario WHERE idProductoColor = ? AND estado = 'Activo'`,
-            [idProductoColores]
-          );
-
-          if (inventario.length === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-              success: false,
-              message: `Producto con idProductoColores ${idProductoColores} no encontrado en el inventario.`,
-            });
-          }
-
-          const { stock, stockReal } = inventario[0];
-
-          // Validar que el nuevo stock no exceda stockReal
-          const newStock = stock + cantidad;
-          if (newStock > stockReal) {
-            await connection.rollback();
-            return res.status(400).json({
-              success: false,
-              message: `La devolución de ${cantidad} unidades para el producto con idProductoColores ${idProductoColores} excede el stock real (${stockReal}).`,
-            });
-          }
-
-          // Actualizar el stock (solo stock, no stockReservado)
-          await connection.query(
-            `UPDATE tblinventario SET stock = ? WHERE idProductoColor = ?`,
-            [newStock, idProductoColores]
-          );
-
-        
-      
-        }
-
-        // Actualizar el estado del pedido
-        const fechaModificacion = obtenerFechaMexico();
-        await connection.query(
-          `UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?`,
-          [estadoActual, fechaModificacion, id]
-        );
-
-      
-        await connection.commit();
-
-        res.status(200).json({
-          success: true,
-          message: "Pedido cancelado exitosamente y productos devueltos al inventario.",
-          data: { id, estadoActual },
-        });
-      } catch (error) {
-        await connection.rollback();
-        console.error("❌ Error al cancelar el pedido:", error);
-        res.status(500).json({
-          success: false,
-          message: "Error interno del servidor al cancelar el pedido.",
-          error: error.message,
-          code: error.code || "UNKNOWN",
-        });
-      } finally {
-        if (connection) {
-          connection.release();
-        }
-      }
+    console.log("Datos recibidos", id, estadoActual)
+    if (estadoActual !== "Cancelado") {
+      return res.status(400).json({
+        success: false,
+        message: "El estado debe ser 'Cancelado' para esta operación.",
+      });
     }
-  );
 
-
-
-
-  //Enpot de historial de pedido asignados 
-  routerRepartidorPedidos.get("/repartidores/historial", verifyToken, async (req, res) => {
-    const { fecha } = req.query; // Filtrar por fecha de asignación (YYYY-MM-DD)
-    const currentDate = moment.tz("America/Mexico_City").format("YYYY-MM-DD");
-    console.log("Fecha de filtro:", fecha);
+    const connection = await pool.getConnection();
 
     try {
-      const [rows] = await pool.query(
-        `
+      await connection.beginTransaction();
+
+      // Verificar si el pedido existe
+      const [existingPedido] = await connection.query(
+        `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?`,
+        [id]
+      );
+
+      if (existingPedido.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Pedido no encontrado.",
+        });
+      }
+
+      const pedido = existingPedido[0];
+      if (pedido.estadoActual === "Cancelado") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "El pedido ya está cancelado.",
+        });
+      }
+
+      // Obtener los detalles de los productos asociados al pedido, excluyendo los ya cancelados
+      const [pedidoDetalles] = await connection.query(
+        `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
+        [id]
+      );
+
+      // Actualizar el inventario para cada producto
+      for (const detalle of pedidoDetalles) {
+        const { idProductoColores, cantidad } = detalle;
+
+        // Verificar si el producto existe en el inventario
+        const [inventario] = await connection.query(
+          `SELECT stock, stockReal FROM tblinventario WHERE idProductoColor = ? AND estado = 'Activo'`,
+          [idProductoColores]
+        );
+
+        if (inventario.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({
+            success: false,
+            message: `Producto con idProductoColores ${idProductoColores} no encontrado en el inventario.`,
+          });
+        }
+
+        const { stock, stockReal } = inventario[0];
+
+        // Validar que el nuevo stock no exceda stockReal
+        const newStock = stock + cantidad;
+        if (newStock > stockReal) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `La devolución de ${cantidad} unidades para el producto con idProductoColores ${idProductoColores} excede el stock real (${stockReal}).`,
+          });
+        }
+
+        // Actualizar el stock (solo stock, no stockReservado)
+        await connection.query(
+          `UPDATE tblinventario SET stock = ? WHERE idProductoColor = ?`,
+          [newStock, idProductoColores]
+        );
+
+
+
+      }
+
+      // Actualizar el estado del pedido
+      const fechaModificacion = obtenerFechaMexico();
+      await connection.query(
+        `UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?`,
+        [estadoActual, fechaModificacion, id]
+      );
+
+      // Eliminar la asignación del pedido (si aplica)
+      // await connection.query(
+      //   `DELETE FROM tblasignacionpedidos WHERE idPedido = ?`,
+      //   [id]
+      // );
+
+      await connection.commit();
+
+      res.status(200).json({
+        success: true,
+        message: "Pedido cancelado exitosamente y productos devueltos al inventario.",
+        data: { id, estadoActual },
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error al cancelar el pedido:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno del servidor al cancelar el pedido.",
+        error: error.message,
+        code: error.code || "UNKNOWN",
+      });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
+//enpoit de cancelar movil
+routerRepartidorPedidos.put("/pedidos-movil/:id", verifyToken,
+  async (req, res) => {
+    const { id } = req.params;
+    const { estadoActual } = req.body;
+
+    console.log("Datos recibidos", id, estadoActual)
+    if (estadoActual !== "Cancelado") {
+      return res.status(400).json({
+        success: false,
+        message: "El estado debe ser 'Cancelado' para esta operación.",
+      });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Verificar si el pedido existe
+      const [existingPedido] = await connection.query(
+        `SELECT idPedido, estadoActual FROM tblpedidos WHERE idPedido = ?`,
+        [id]
+      );
+
+      if (existingPedido.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Pedido no encontrado.",
+        });
+      }
+
+      const pedido = existingPedido[0];
+      if (pedido.estadoActual === "Cancelado") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "El pedido ya está cancelado.",
+        });
+      }
+
+      // Obtener los detalles de los productos asociados al pedido, excluyendo los ya cancelados
+      const [pedidoDetalles] = await connection.query(
+        `SELECT idProductoColores, cantidad FROM tblpedidodetalles WHERE idPedido = ?`,
+        [id]
+      );
+
+      // Actualizar el inventario para cada producto
+      for (const detalle of pedidoDetalles) {
+        const { idProductoColores, cantidad } = detalle;
+
+        // Verificar si el producto existe en el inventario
+        const [inventario] = await connection.query(
+          `SELECT stock, stockReal FROM tblinventario WHERE idProductoColor = ? AND estado = 'Activo'`,
+          [idProductoColores]
+        );
+
+        if (inventario.length === 0) {
+          await connection.rollback();
+          return res.status(404).json({
+            success: false,
+            message: `Producto con idProductoColores ${idProductoColores} no encontrado en el inventario.`,
+          });
+        }
+
+        const { stock, stockReal } = inventario[0];
+
+        // Validar que el nuevo stock no exceda stockReal
+        const newStock = stock + cantidad;
+        if (newStock > stockReal) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `La devolución de ${cantidad} unidades para el producto con idProductoColores ${idProductoColores} excede el stock real (${stockReal}).`,
+          });
+        }
+
+        // Actualizar el stock (solo stock, no stockReservado)
+        await connection.query(
+          `UPDATE tblinventario SET stock = ? WHERE idProductoColor = ?`,
+          [newStock, idProductoColores]
+        );
+
+
+
+      }
+
+      // Actualizar el estado del pedido
+      const fechaModificacion = obtenerFechaMexico();
+      await connection.query(
+        `UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?`,
+        [estadoActual, fechaModificacion, id]
+      );
+
+
+      await connection.commit();
+
+      res.status(200).json({
+        success: true,
+        message: "Pedido cancelado exitosamente y productos devueltos al inventario.",
+        data: { id, estadoActual },
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error("❌ Error al cancelar el pedido:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error interno del servidor al cancelar el pedido.",
+        error: error.message,
+        code: error.code || "UNKNOWN",
+      });
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
+
+
+
+//Enpot de historial de pedido asignados 
+routerRepartidorPedidos.get("/repartidores/historial", verifyToken, async (req, res) => {
+  const { fecha } = req.query; // Filtrar por fecha de asignación (YYYY-MM-DD)
+  const currentDate = moment.tz("America/Mexico_City").format("YYYY-MM-DD");
+  console.log("Fecha de filtro:", fecha);
+
+  try {
+    const [rows] = await pool.query(
+      `
           SELECT
             p.idPedido,
             p.idRastreo,
@@ -1173,50 +1212,50 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
             AND (? IS NULL OR DATE(ap.fechaAsignacion) = ?)
         ORDER BY ap.fechaAsignacion DESC
         `,
-        [fecha || null, fecha || null]
-      );
-      console.log("Resultado de mi endpoint historial:", rows);
+      [fecha || null, fecha || null]
+    );
+    console.log("Resultado de mi endpoint historial:", rows);
 
-      const historial = rows.map((row) => ({
-        idPedido: row.idPedido,
-        idRastreo: row.idRastreo,
-        fechaAsignacion: row.fechaAsignacion,
-        estado: row.direccionEstado,
-        municipio: row.municipio,
-        localidad: row.localidad,
-        repartidor: {
-          id: row.repartidorId,
-          nombre: row.repartidorNombre,
-          correo: row.repartidorCorreo,
-          fotoPerfil: row.fotoPerfil,
-          telefono: row.telefono
-        },
-        tipoPedidoEstado: row.tipoPedidoEstado, 
-      }));
+    const historial = rows.map((row) => ({
+      idPedido: row.idPedido,
+      idRastreo: row.idRastreo,
+      fechaAsignacion: row.fechaAsignacion,
+      estado: row.direccionEstado,
+      municipio: row.municipio,
+      localidad: row.localidad,
+      repartidor: {
+        id: row.repartidorId,
+        nombre: row.repartidorNombre,
+        correo: row.repartidorCorreo,
+        fotoPerfil: row.fotoPerfil,
+        telefono: row.telefono
+      },
+      tipoPedidoEstado: row.tipoPedidoEstado,
+    }));
 
-      res.status(200).json({
-        success: true,
-        total: historial.length,
-        data: historial,
-      });
-    } catch (error) {
-      console.error("❌ Error al obtener historial de repartidores:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error al obtener el historial de pedidos de los repartidores.",
-        error: error.message,
-      });
-    }
-  });
+    res.status(200).json({
+      success: true,
+      total: historial.length,
+      data: historial,
+    });
+  } catch (error) {
+    console.error("❌ Error al obtener historial de repartidores:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener el historial de pedidos de los repartidores.",
+      error: error.message,
+    });
+  }
+});
 
 
-  routerRepartidorPedidos.get("/repartidores/historial/:idPedido/detalles",  async (req, res) => {
-    const { idPedido } = req.params;
-    console.log("ID del pedido para detalles:", idPedido);
+routerRepartidorPedidos.get("/repartidores/historial/:idPedido/detalles", async (req, res) => {
+  const { idPedido } = req.params;
+  console.log("ID del pedido para detalles:", idPedido);
 
-    try {
-      const [rows] = await pool.query(
-        `
+  try {
+    const [rows] = await pool.query(
+      `
         SELECT
             p.idPedido,
             p.idRastreo,
@@ -1252,57 +1291,57 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
             pr.nombre,
             c.color
         `,
-        [idPedido]
-      );
-      console.log("Resultado de mi endpoint detalles:", rows);
+      [idPedido]
+    );
+    console.log("Resultado de mi endpoint detalles:", rows);
 
-      // Agrupar los detalles de productos y mantener la información general del pedido
-      const pedido = {
-        idPedido: null,
-        idRastreo: null,
-        totalPagar: 0,
-        estadoActual: null,
-        montoPagado: 0,
-        diasAlquiler:0,
-        tipoPedido: null,
-        productos: [],
-      };
+    // Agrupar los detalles de productos y mantener la información general del pedido
+    const pedido = {
+      idPedido: null,
+      idRastreo: null,
+      totalPagar: 0,
+      estadoActual: null,
+      montoPagado: 0,
+      diasAlquiler: 0,
+      tipoPedido: null,
+      productos: [],
+    };
 
-      rows.forEach((row) => {
-        if (!pedido.idPedido) {
-          pedido.idPedido = row.idPedido;
-          pedido.idRastreo = row.idRastreo;
-          pedido.totalPagar = parseFloat(row.totalPagar) || 0;
-          pedido.estadoActual = row.estadoActual;
-          pedido.montoPagado = parseFloat(row.montoPagado) || 0;
-          pedido.diasAlquiler= parseInt(row.diasAlquiler)|| 0;
-          pedido.tipoPedido=row.tipoPedido ;
-        }
-        pedido.productos.push({
-          cantidad: parseInt(row.cantidad) || 0,
-          precioUnitario: parseFloat(row.precioUnitario) || 0,
-          subtotal: parseFloat(row.subtotal) || 0,
-          estadoProducto: row.estadoProducto,
-          observaciones: row.observaciones,
-          nombreProducto: row.nombreProducto,
-          color: row.color,
-        });
+    rows.forEach((row) => {
+      if (!pedido.idPedido) {
+        pedido.idPedido = row.idPedido;
+        pedido.idRastreo = row.idRastreo;
+        pedido.totalPagar = parseFloat(row.totalPagar) || 0;
+        pedido.estadoActual = row.estadoActual;
+        pedido.montoPagado = parseFloat(row.montoPagado) || 0;
+        pedido.diasAlquiler = parseInt(row.diasAlquiler) || 0;
+        pedido.tipoPedido = row.tipoPedido;
+      }
+      pedido.productos.push({
+        cantidad: parseInt(row.cantidad) || 0,
+        precioUnitario: parseFloat(row.precioUnitario) || 0,
+        subtotal: parseFloat(row.subtotal) || 0,
+        estadoProducto: row.estadoProducto,
+        observaciones: row.observaciones,
+        nombreProducto: row.nombreProducto,
+        color: row.color,
       });
+    });
 
-      res.status(200).json({
-        success: true,
-        total: pedido.productos.length,
-        data: pedido,
-      });
-    } catch (error) {
-      console.error("❌ Error al obtener detalles del pedido:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error al obtener los detalles del pedido.",
-        error: error.message,
-      });
-    }
-  });
+    res.status(200).json({
+      success: true,
+      total: pedido.productos.length,
+      data: pedido,
+    });
+  } catch (error) {
+    console.error("❌ Error al obtener detalles del pedido:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al obtener los detalles del pedido.",
+      error: error.message,
+    });
+  }
+});
 
 
 
@@ -1310,9 +1349,9 @@ routerRepartidorPedidos.get("/pedidos", async (req, res) => {
 
 routerRepartidorPedidos.get("/repartidor/datos", verifyToken, csrfProtection, async (req, res) => {
   try {
-    const idUsuario = req.user?.id ;
+    const idUsuario = req.user?.id;
     console.log("Datos de topken", idUsuario)
-   
+
 
     if (!idUsuario) {
       return res.status(401).json({ error: "ID de usuario no encontrado en el token" });
@@ -1396,9 +1435,9 @@ routerRepartidorPedidos.get("/repartidor/datos", verifyToken, csrfProtection, as
 });
 
 
-routerRepartidorPedidos.get('/repartidor/estadisticas',verifyToken, async (req, res) => {
+routerRepartidorPedidos.get('/repartidor/estadisticas', verifyToken, async (req, res) => {
   try {
-     const idUsuario = req.user?.id ; 
+    const idUsuario = req.user?.id;
 
     if (!idUsuario) {
       return res.status(400).json({ error: 'Falta idUsuario en la petición' });
@@ -1431,9 +1470,9 @@ routerRepartidorPedidos.get('/repartidor/estadisticas',verifyToken, async (req, 
 
 
 
-routerRepartidorPedidos.get('/repartidor/estadistica-movil',verifyToken, async (req, res) => {
+routerRepartidorPedidos.get('/repartidor/estadistica-movil', verifyToken, async (req, res) => {
   try {
-     const idUsuario = req.user?.id ; 
+    const idUsuario = req.user?.id;
 
     if (!idUsuario) {
       return res.status(400).json({ error: 'Falta idUsuario en la petición' });
@@ -1715,13 +1754,13 @@ routerRepartidorPedidos.get("/repartidor/todos-pedidos", async (req, res) => {
 
       repartidor: p.idRepartidor
         ? {
-            idRepartidor: p.idRepartidor,
-            nombre: p.nombreRepartidor,
-            apellidoP: p.apellidoPRepartidor,
-            apellidoM: p.apellidoMRepartidor,
-            telefono: p.telefonoRepartidor,
-            fechaAsignacion: moment(p.fechaAsignacion).tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss"),
-          }
+          idRepartidor: p.idRepartidor,
+          nombre: p.nombreRepartidor,
+          apellidoP: p.apellidoPRepartidor,
+          apellidoM: p.apellidoMRepartidor,
+          telefono: p.telefonoRepartidor,
+          fechaAsignacion: moment(p.fechaAsignacion).tz("America/Mexico_City").format("YYYY-MM-DD HH:mm:ss"),
+        }
         : null,
     }));
 
@@ -1836,10 +1875,10 @@ routerRepartidorPedidos.get("/repartidor/pedido/:idPedido", async (req, res) => 
 routerRepartidorPedidos.post('/pedidos/:idPedido/incidente', verifyToken, csrfProtection, async (req, res) => {
   const { idPedido } = req.params;
   const { entireOrderIssue, orderObservations, productIssues, estado_pedido } = req.body;
-   console.log("Datos recibidso idPEDIDO", idPedido )
+  console.log("Datos recibidso idPEDIDO", idPedido)
 
 
-  console.log("Datos recibidso", entireOrderIssue, orderObservations, productIssues, estado_pedido )
+  console.log("Datos recibidso", entireOrderIssue, orderObservations, productIssues, estado_pedido)
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -1870,14 +1909,14 @@ routerRepartidorPedidos.post('/pedidos/:idPedido/incidente', verifyToken, csrfPr
     const fechaModificacion = obtenerFechaMexico();
 
     // Actualizar el estado del pedido
-   await connection.query(
-  'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
-  [
-    estado_pedido,     // nuevo estado
-    fechaModificacion, // nueva fecha
-    idPedido           // id del pedido a actualizar
-  ]
-);
+    await connection.query(
+      'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
+      [
+        estado_pedido,     // nuevo estado
+        fechaModificacion, // nueva fecha
+        idPedido           // id del pedido a actualizar
+      ]
+    );
 
 
     // Caso 1: Incidente afecta todo el pedido
@@ -1932,7 +1971,7 @@ routerRepartidorPedidos.post('/pedidos/:idPedido/incidente', verifyToken, csrfPr
           ]
         );
 
-      
+
       }
     }
 
@@ -1960,10 +1999,10 @@ routerRepartidorPedidos.post('/pedidos/:idPedido/incidente', verifyToken, csrfPr
 routerRepartidorPedidos.post('/pedidos/:idPedido/incidente-movil', verifyToken, async (req, res) => {
   const { idPedido } = req.params;
   const { entireOrderIssue, orderObservations, productIssues, estado_pedido } = req.body;
-   console.log("Datos recibidso idPEDIDO", idPedido )
+  console.log("Datos recibidso idPEDIDO", idPedido)
 
 
-  console.log("Datos recibidso", entireOrderIssue, orderObservations, productIssues, estado_pedido )
+  console.log("Datos recibidso", entireOrderIssue, orderObservations, productIssues, estado_pedido)
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -1994,14 +2033,14 @@ routerRepartidorPedidos.post('/pedidos/:idPedido/incidente-movil', verifyToken, 
     const fechaModificacion = obtenerFechaMexico();
 
     // Actualizar el estado del pedido
-   await connection.query(
-  'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
-  [
-    estado_pedido,     // nuevo estado
-    fechaModificacion, // nueva fecha
-    idPedido           // id del pedido a actualizar
-  ]
-);
+    await connection.query(
+      'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
+      [
+        estado_pedido,     // nuevo estado
+        fechaModificacion, // nueva fecha
+        idPedido           // id del pedido a actualizar
+      ]
+    );
 
 
     // Caso 1: Incidente afecta todo el pedido
@@ -2056,7 +2095,7 @@ routerRepartidorPedidos.post('/pedidos/:idPedido/incidente-movil', verifyToken, 
           ]
         );
 
-      
+
       }
     }
 
@@ -2118,7 +2157,7 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status/en-alquiler', verifyToken
     const fechaModificacion = obtenerFechaMexico();
     await connection.query(
       'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
-      ['En alquiler', fechaModificacion,idPedido]
+      ['En alquiler', fechaModificacion, idPedido]
     );
 
     await connection.commit();
@@ -2176,7 +2215,7 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status-movil/en-alquiler', verif
     const fechaModificacion = obtenerFechaMexico();
     await connection.query(
       'UPDATE tblpedidos SET estadoActual = ?, FechaA = ? WHERE idPedido = ?',
-      ['En alquiler', fechaModificacion,idPedido]
+      ['En alquiler', fechaModificacion, idPedido]
     );
 
     await connection.commit();
@@ -2241,7 +2280,7 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status/devuelto', verifyToken, c
       ['Devuelto', fechaModificacion, idPedido]
     );
 
-    
+
     await connection.commit();
 
     res.status(200).json({
@@ -2263,7 +2302,7 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status/devuelto', verifyToken, c
 });
 
 //Mopvil
-routerRepartidorPedidos.put('/pedidos/:idPedido/status-movil/devuelto', verifyToken, csrfProtection, async (req, res) => {
+routerRepartidorPedidos.put('/pedidos/:idPedido/status-movil/devuelto', verifyToken, async (req, res) => {
   const { idPedido } = req.params;
 
   const connection = await pool.getConnection();
@@ -2301,7 +2340,7 @@ routerRepartidorPedidos.put('/pedidos/:idPedido/status-movil/devuelto', verifyTo
       ['Devuelto', fechaModificacion, idPedido]
     );
 
-    
+
     await connection.commit();
 
     res.status(200).json({
@@ -2375,7 +2414,7 @@ routerRepartidorPedidos.put(
         [estadoActual, fechaModificacion, id]
       );
 
-    
+
 
       await connection.commit();
 
