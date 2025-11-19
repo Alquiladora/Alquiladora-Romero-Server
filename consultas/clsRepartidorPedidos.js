@@ -2481,7 +2481,7 @@ routerRepartidorPedidos.get('/repartidor/pedidos-historico', verifyToken, async 
           )
         ) AS productos
       FROM tblasignacionpedidos ap
-      JOIN tblpedidos p ON ap.idPedido = p.idPedido AND p.estadoActual = 'En alquiler' || p.estadoActual = 'Devuelto'
+      JOIN tblpedidos p ON ap.idPedido = p.idPedido AND p.estadoActual = 'En alquiler' || p.estadoActual = 'Devuelto' || p.estadoActual = 'Finalizado'
       JOIN tbldireccioncliente dc ON p.idDireccion = dc.idDireccion
       LEFT JOIN tblusuarios u ON p.idUsuarios = u.idUsuarios
       LEFT JOIN tblnoclientes nc ON p.idNoClientes = nc.idNoClientes

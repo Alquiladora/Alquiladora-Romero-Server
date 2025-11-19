@@ -835,6 +835,47 @@ usuarioRouter.post("/Delete/login", csrfProtection, verifyToken, async (req, res
   }
 });
 
+
+usuarioRouter.post("/Delete/login-movil",  verifyToken, async (req, res) => {
+  const token = req.cookies.sesionToken;
+  const HoraFinal = obtenerFechaMexico();
+  console.log("ESte es el tookie que recibe", token);
+  if (!token) {
+    return res.status(400).json({ message: "No hay sesión activa." });
+  }
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    const userId = decoded.id;
+
+    const query = `
+    UPDATE tblsesiones
+    SET horaFin = ?
+     WHERE idUsuarios = ?
+        AND cookie = ?
+        AND horaFin IS NULL
+    `;
+
+    const [result] = await pool.query(query, [HoraFinal, userId, token]);
+
+    if (result.affectedRows === 0) {
+      console.warn("⚠️ No se encontró una sesión activa para actualizar.");
+    } else {
+      console.log("✅ horaFin actualizada correctamente.");
+    }
+    res.clearCookie("sesionToken", {
+      httpOnly: true,
+      secure:isProd ,
+      sameSite: "None",
+    });
+    console.log("sesion cerrada correctamente");
+    res.json({ message: "Sesión cerrada correctamente." });
+  } catch (error) {
+    console.error("Error al cerrar la sesión:", error);
+    res.status(500).json({ message: "Error al cerrar la sesión." });
+  }
+});
+
 //CeRRAR TODAS LAS CESIONES
 usuarioRouter.post(
   "/Delete/login/all-except-current",
@@ -1854,5 +1895,67 @@ usuarioRouter.post('/desuscripcion', csrfProtection, verifyToken, async (req, re
         res.status(500).json({ message: "Error interno al procesar la desvinculación." });
     }
 });
+
+
+//Movil
+
+usuarioRouter.post("/register-fcm-token", verifyToken, async (req, res) => {
+    const { fcmToken } = req.body;
+    const userId = req.user?.id;
+
+    if (!fcmToken) {
+        return res.status(400).json({ message: "Token FCM requerido." });
+    }
+
+    try {
+        const upsertQuery = `
+            INSERT INTO tblnotificacionmovil (idUsuario, fcmToken)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE
+                idUsuario = VALUES(idUsuario),
+                fechaActualizacion = NOW()
+        `;
+
+        await pool.query(upsertQuery, [userId, fcmToken]);
+
+        res.status(200).json({ message: "Token FCM registrado/actualizado correctamente." });
+
+    } catch (error) {
+        console.error("⚠️ Error al registrar token FCM:", error);
+        res.status(500).json({ message: "Error interno al registrar el token." });
+    }
+});
+
+
+
+usuarioRouter.post("/clear-fcm-token", verifyToken, async (req, res) => {
+    const { fcmToken } = req.body;
+    const userId = req.user.id;
+
+    if (!fcmToken) {
+        return res.status(400).json({ message: "Token FCM obligatorio para desvincular." });
+    }
+
+    try {
+        const updateQuery = `
+            UPDATE tblnotificacionmovil
+            SET idUsuario = NULL
+            WHERE fcmToken = ? AND idUsuario = ?
+        `;
+
+        const [result] = await pool.query(updateQuery, [fcmToken, userId]);
+
+        if (result.affectedRows === 0) {
+            console.warn(`⚠️ Token ya desvinculado o no pertenece al usuario ${userId}`);
+        }
+
+        res.status(200).json({ message: "Token FCM desvinculado correctamente." });
+
+    } catch (error) {
+        console.error("❌ Error al desvincular token FCM:", error);
+        res.status(500).json({ message: "Error interno." });
+    }
+});
+
 
 module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };                                          
