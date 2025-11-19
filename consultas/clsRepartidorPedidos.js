@@ -796,10 +796,12 @@ routerRepartidorPedidos.post("/pedidos/asignar",
   csrfProtection,
   async (req, res) => {
     const { repartidorId, pedidosIds } = req.body;
+    const userId = req.user?.id;
 
     console.log("Datos recibidos para asignación:", {
       repartidorId,
       pedidosIds,
+      userId
     });
 
     if (
@@ -873,7 +875,7 @@ routerRepartidorPedidos.post("/pedidos/asignar",
           `SELECT fcmToken FROM tblnotificacionmovil 
            WHERE idUsuario = ? AND fcmToken IS NOT NULL 
            LIMIT 1`,
-          [repartidorId]
+          [userId]
         );
 
         if (tokenRow.length > 0 && tokenRow[0].fcmToken) {
