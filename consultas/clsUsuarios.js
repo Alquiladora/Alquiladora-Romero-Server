@@ -1988,15 +1988,14 @@ usuarioRouter.get("/notificaciones/semana-actual", verifyToken, async (req, res)
 
    
     const query = `
-      SELECT 
+        SELECT 
         a.idPedido,
         a.fechaAsignacion,
         p.idRastreo,
         p.tipoPedido,
-        p.direccionEstado,
-        p.municipio,
-        p.localidad,
-        p.tipoPedidoEstado
+        p.estadoActual,
+        p.fechaInicio,
+        p.fechaEntrega
       FROM tblasignacionpedidos a
       LEFT JOIN tblpedidos p ON a.idPedido = p.idPedido
       WHERE a.idRepartidor = ?
