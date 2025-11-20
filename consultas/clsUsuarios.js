@@ -1908,11 +1908,11 @@ usuarioRouter.post("/register-fcm-token", verifyToken, async (req, res) => {
     }
 
     try {
-        const upsertQuery = `
-            INSERT INTO tblnotificacionmovil (idUsuario, fcmToken)
-            VALUES (?, ?)
-            ON DUPLICATE KEY UPDATE
-                idUsuario = VALUES(idUsuario),
+       const upsertQuery = `
+            INSERT INTO tblnotificacionmovil (idUsuario, fcmToken, fechaActualizacion) 
+            VALUES (?, ?, NOW())
+            ON DUPLICATE KEY UPDATE 
+                fcmToken = VALUES(fcmToken),
                 fechaActualizacion = NOW()
         `;
 
@@ -1929,33 +1929,28 @@ usuarioRouter.post("/register-fcm-token", verifyToken, async (req, res) => {
 
 
 usuarioRouter.post("/clear-fcm-token", verifyToken, async (req, res) => {
-    const { fcmToken } = req.body;
     const userId = req.user.id;
-
-    if (!fcmToken) {
-        return res.status(400).json({ message: "Token FCM obligatorio para desvincular." });
-    }
-
     try {
-        const updateQuery = `
-            UPDATE tblnotificacionmovil
-            SET idUsuario = NULL
-            WHERE fcmToken = ? AND idUsuario = ?
+        const query = `
+            UPDATE tblnotificacionmovil 
+            SET fcmToken = NULL, fechaActualizacion = NOW()
+            WHERE idUsuario = ?
         `;
 
-        const [result] = await pool.query(updateQuery, [fcmToken, userId]);
+        const [result] = await pool.query(query, [userId]);
 
-        if (result.affectedRows === 0) {
-            console.warn(`⚠️ Token ya desvinculado o no pertenece al usuario ${userId}`);
+        if (result.affectedRows > 0) {
+            console.log(`Token FCM desvinculado para usuario ${userId}`);
         }
 
-        res.status(200).json({ message: "Token FCM desvinculado correctamente." });
+        res.json({ message: "Token FCM desvinculado correctamente." });
 
     } catch (error) {
-        console.error("❌ Error al desvincular token FCM:", error);
+        console.error("Error al desvincular token FCM:", error);
         res.status(500).json({ message: "Error interno." });
     }
 });
+
 
 
 module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };                                          
