@@ -1953,4 +1953,74 @@ usuarioRouter.post("/clear-fcm-token", verifyToken, async (req, res) => {
 
 
 
+
+usuarioRouter.get("/notificaciones/semana-actual", verifyToken, async (req, res) => {
+  const userId = req.user.id; 
+
+  try {
+
+    const [repartidorRow] = await pool.query(
+      `SELECT idRepartidor FROM tblrepartidores WHERE idUsuario = ? AND activo = 1`,
+      [userId]
+    );
+
+    if (!repartidorRow.length) {
+      return res.json({ success: true, notificaciones: [], semana: { desde: "", hasta: "" } });
+    }
+
+    const idRepartidor = repartidorRow[0].idRepartidor;
+
+ 
+    const hoy = new Date();
+    const lunes = new Date(hoy);
+    const domingo = new Date(hoy);
+
+    const diaSemana = hoy.getDay();
+    const diferenciaLunes = diaSemana === 0 ? -6 : 1 - diaSemana;
+    lunes.setDate(hoy.getDate() + diferenciaLunes);
+    lunes.setHours(0, 0, 0, 0);
+
+    domingo.setDate(lunes.getDate() + 6);
+    domingo.setHours(23, 59, 59, 999);
+
+    const fechaLunes = lunes.toISOString().slice(0, 19).replace('T', ' ');
+    const fechaDomingo = domingo.toISOString().slice(0, 19).replace('T', ' ');
+
+   
+    const query = `
+      SELECT 
+        a.idPedido,
+        a.fechaAsignacion,
+        p.idRastreo,
+        p.tipoPedido,
+        p.direccionEstado,
+        p.municipio,
+        p.localidad,
+        p.tipoPedidoEstado
+      FROM tblasignacionpedidos a
+      LEFT JOIN tblpedidos p ON a.idPedido = p.idPedido
+      WHERE a.idRepartidor = ?
+        AND a.fechaAsignacion BETWEEN ? AND ?
+      ORDER BY a.fechaAsignacion DESC
+    `;
+
+    const [rows] = await pool.query(query, [idRepartidor, fechaLunes, fechaDomingo]);
+
+    res.json({
+      success: true,
+      semana: {
+        desde: lunes.toISOString().split('T')[0],
+        hasta: domingo.toISOString().split('T')[0]
+      },
+      notificaciones: rows
+    });
+
+  } catch (error) {
+    console.error("Error al obtener notificaciones:", error);
+    res.status(500).json({ success: false, message: "Error del servidor" });
+  }
+});
+
+
+
 module.exports = { usuarioRouter, verifyToken, obtenerFechaMexico };                                          
