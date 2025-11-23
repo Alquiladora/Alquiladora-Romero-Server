@@ -690,7 +690,7 @@ produtosRouter.get("/productosRelacionado/:idSubCategoria", async (req, res) => 
     const { idSubCategoria } = req.params;
     try {
       const sql = `
-    SELECT 
+      SELECT 
     p.idProducto,
     p.nombre AS nombreProducto,
     p.fechaCreacion,
@@ -699,26 +699,30 @@ produtosRouter.get("/productosRelacionado/:idSubCategoria", async (req, res) => 
     sc.nombre AS nombreSubcategoria,
     pr.precioAlquiler,
     col.color AS nombreColor,
-    SUM(i.stock) AS stock,
-    i.estado AS estadoProducto,
+    COALESCE(inv.stock_total, 0) AS stock,
     GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
-  FROM tblproductos p
-  JOIN tblsubcategoria sc 
+FROM tblproductos p
+JOIN tblsubcategoria sc 
     ON p.idSubCategoria = sc.idSubCategoria
-  LEFT JOIN tblprecio pr
+LEFT JOIN tblprecio pr
     ON p.idProducto = pr.idProducto
-  LEFT JOIN tblproductoscolores pc 
+LEFT JOIN tblproductoscolores pc 
     ON p.idProducto = pc.idProducto
-  LEFT JOIN tblcolores col 
+LEFT JOIN tblcolores col 
     ON pc.idColor = col.idColores
-  LEFT JOIN tblinventario i 
-    ON pc.idProductoColores = i.idProductoColor
-  LEFT JOIN tblfotosproductos f
+LEFT JOIN (
+    SELECT 
+        idProductoColor,
+        SUM(stock) AS stock_total
+    FROM tblinventario
+    GROUP BY idProductoColor
+) inv ON inv.idProductoColor = pc.idProductoColores
+
+LEFT JOIN tblfotosproductos f
     ON p.idProducto = f.idProducto
-  WHERE sc.idSubCategoria =  ?
-  GROUP BY p.idProducto, col.idColores;
+WHERE sc.idSubCategoria = ?
+GROUP BY p.idProducto, col.idColores;   
       `;
-     
       const [rows] = await pool.query(sql, [idSubCategoria]);
   
       if (rows.length === 0) {
