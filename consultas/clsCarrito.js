@@ -201,8 +201,8 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [result] = await connection.query(   
-       `UPDATE tblinventario i 
+    const [result] = await connection.query(
+      `UPDATE tblinventario i 
       JOIN tblbodegas b ON i.idBodega = b.idBodega 
       SET i.stockReservado = i.stockReservado + ? 
       WHERE i.idProductoColor = ? 
@@ -244,13 +244,15 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
         const response = await axios.post(
           "https://modelorecomendacion-l6os.onrender.com/recomendar",
           { productos: nombresProductos },
-          { timeout: 2000 }
+          { timeout: 7000 }
         );
 
         const nombresRecomendados = response.data.recomendaciones || [];
         if (nombresRecomendados.length > 0) {
+          const placeholders = nombresRecomendados.map(() => "?").join(",");
           const [productosRecomendados] = await connection.query(
-            `SELECT 
+            `
+  SELECT 
     p.idProducto, 
     p.nombre, 
     pr.precioAlquiler,
@@ -260,40 +262,35 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
     colData.stockDisponible,
     sc.nombre AS nombreSubcategoria,
     cat.nombre AS nombreCategoria
-FROM tblproductos p
-
-JOIN (
-    SELECT 
-        pc.idProducto,
-        pc.idProductoColores,
-        c.color,
-        SUM(i.stock) AS stockDisponible
-    FROM tblproductoscolores pc
-    JOIN tblcolores c ON pc.idColor = c.idColores
-    LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
-    GROUP BY pc.idProducto, pc.idProductoColores, c.color
-) colData ON colData.idProducto = p.idProducto
-
-JOIN tblprecio pr ON p.idProducto = pr.idProducto
-LEFT JOIN (
-    SELECT idProducto, MIN(urlFoto) AS imagenProducto
-    FROM tblfotosproductos
-    GROUP BY idProducto
-) f ON p.idProducto = f.idProducto
-
-JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
-JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
-
-WHERE p.nombre = (?)
-  AND colData.stockDisponible > 0
-
-LIMIT 5;
-            `,
-            [nombresRecomendados]
+  FROM tblproductos p
+  JOIN (
+      SELECT 
+          pc.idProducto,
+          pc.idProductoColores,
+          c.color,
+          SUM(i.stock) AS stockDisponible
+      FROM tblproductoscolores pc
+      JOIN tblcolores c ON pc.idColor = c.idColores
+      LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+      GROUP BY pc.idProducto, pc.idProductoColores, c.color
+  ) colData ON colData.idProducto = p.idProducto
+  JOIN tblprecio pr ON p.idProducto = pr.idProducto
+  LEFT JOIN (
+      SELECT idProducto, MIN(urlFoto) AS imagenProducto
+      FROM tblfotosproductos
+      GROUP BY idProducto
+  ) f ON p.idProducto = f.idProducto
+  JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+  JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
+  WHERE p.nombre IN (${placeholders})
+    AND colData.stockDisponible > 0
+  LIMIT 5;
+  `,
+            nombresRecomendados
           );
           recomendaciones = productosRecomendados;
         } else {
-            recomendaciones = await getFallbackRecommendations(connection);
+          recomendaciones = await getFallbackRecommendations(connection);
         }
       }
     } catch (error) {
@@ -420,34 +417,34 @@ routerCarrito.delete("/eliminar/:idCarrito", verifyToken, async (req, res) => {
     await connection.commit();
 
 
-     // --- INICIO: RECALCULAR RECOMENDACIONES ---
-        let recomendaciones = [];
-        try {
-            // 1. Obtener la lista actualizada de productos que QUEDAN en el carrito
-            const [itemsActuales] = await connection.query(
-                `SELECT DISTINCT p.nombre 
+    // --- INICIO: RECALCULAR RECOMENDACIONES ---
+    let recomendaciones = [];
+    try {
+      // 1. Obtener la lista actualizada de productos que QUEDAN en el carrito
+      const [itemsActuales] = await connection.query(
+        `SELECT DISTINCT p.nombre 
                  FROM tblcarrito ca
                  JOIN tblproductoscolores pc ON ca.idProductoColor = pc.idProductoColores
                  JOIN tblproductos p ON pc.idProducto = p.idProducto
                  WHERE ca.idUsuario = ?`,
-                [idUsuario]
-            );
+        [idUsuario]
+      );
 
-            // 2. Si todavía quedan productos, pedir nuevas recomendaciones
-            if (itemsActuales.length > 0) {
-                const nombresDeProductosEnCarrito = itemsActuales.map(item => item.nombre);
-                console.log("Productos restantes para recalcular recomendaciones:", nombresDeProductosEnCarrito);
+      // 2. Si todavía quedan productos, pedir nuevas recomendaciones
+      if (itemsActuales.length > 0) {
+        const nombresDeProductosEnCarrito = itemsActuales.map(item => item.nombre);
+        console.log("Productos restantes para recalcular recomendaciones:", nombresDeProductosEnCarrito);
 
-                const responseRecomendador = await axios.post('https://modelorecomendacion-l6os.onrender.com/recomendar', {
-                    productos: nombresDeProductosEnCarrito
-                });
-                
-                const nombresRecomendados = responseRecomendador.data.recomendaciones;
+        const responseRecomendador = await axios.post('https://modelorecomendacion-l6os.onrender.com/recomendar', {
+          productos: nombresDeProductosEnCarrito
+        });
 
-                // 3. Obtener detalles de las nuevas recomendaciones
-                if (nombresRecomendados && nombresRecomendados.length > 0) {
-                    const [productosRecomendados] = await connection.query(
-                        `SELECT 
+        const nombresRecomendados = responseRecomendador.data.recomendaciones;
+
+        // 3. Obtener detalles de las nuevas recomendaciones
+        if (nombresRecomendados && nombresRecomendados.length > 0) {
+          const [productosRecomendados] = await connection.query(
+            `SELECT 
                             p.idProducto, p.nombre, p.detalles, pr.precioAlquiler,
                             GROUP_CONCAT(DISTINCT c.color ORDER BY c.color SEPARATOR ', ') AS coloresDisponibles,
                             (SELECT urlFoto FROM tblfotosproductos WHERE idProducto = p.idProducto LIMIT 1) AS imagenProducto,
@@ -460,16 +457,16 @@ routerCarrito.delete("/eliminar/:idCarrito", verifyToken, async (req, res) => {
                          WHERE p.nombre IN (?)
                          GROUP BY p.idProducto
                          HAVING stockDisponible > 0;`,
-                        [nombresRecomendados]
-                    );
-                    recomendaciones = productosRecomendados;
-                }
-            } else {
-                console.log("El carrito está vacío, no se piden recomendaciones.");
-            }
-        } catch (recomendacionError) {
-            console.error("Error al recalcular recomendaciones:", recomendacionError.message);
+            [nombresRecomendados]
+          );
+          recomendaciones = productosRecomendados;
         }
+      } else {
+        console.log("El carrito está vacío, no se piden recomendaciones.");
+      }
+    } catch (recomendacionError) {
+      console.error("Error al recalcular recomendaciones:", recomendacionError.message);
+    }
 
     const userSockets = getUserSockets();
 
@@ -485,7 +482,7 @@ routerCarrito.delete("/eliminar/:idCarrito", verifyToken, async (req, res) => {
 
     res
       .status(200)
-      .json({ success: true, mensaje: "Producto eliminado del carrito" ,recomendaciones: recomendaciones });
+      .json({ success: true, mensaje: "Producto eliminado del carrito", recomendaciones: recomendaciones });
   } catch (error) {
     if (connection) {
       try {
@@ -785,8 +782,8 @@ routerCarrito.post(
       if (paymentResponse.success) {
         estadoPago =
           metodoPago === "spei" ||
-          metodoPago === "oxxo" ||
-          metodoPago === "deposito"
+            metodoPago === "oxxo" ||
+            metodoPago === "deposito"
             ? "pendiente"
             : "completado";
         detallesPago = JSON.stringify(paymentResponse.details || {});
