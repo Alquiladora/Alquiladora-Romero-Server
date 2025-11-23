@@ -249,7 +249,6 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
 
         const nombresRecomendados = response.data.recomendaciones || [];
         if (nombresRecomendados.length > 0) {
-          const placeholders = nombresRecomendados.map(() => "?").join(",");
           const [productosRecomendados] = await connection.query(
             `
   SELECT 
@@ -282,11 +281,11 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
   ) f ON p.idProducto = f.idProducto
   JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
   JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
-  WHERE p.nombre IN (${placeholders})
+  WHERE p.nombre IN (?)
     AND colData.stockDisponible > 0
   LIMIT 5;
   `,
-            nombresRecomendados
+             [nombresRecomendados]
           );
           recomendaciones = productosRecomendados;
         } else {
@@ -295,6 +294,7 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
       }
 
       console.log("Resultado de recomendaciones", recomendaciones);
+
     } catch (error) {
       console.error("Error en API de recomendación, usando fallback:", error.message);
       recomendaciones = await getFallbackRecommendations(connection);
