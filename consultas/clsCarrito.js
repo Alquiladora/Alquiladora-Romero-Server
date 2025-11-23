@@ -201,9 +201,8 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [result] = await connection.query(
-      `
-      UPDATE tblinventario i 
+    const [result] = await connection.query(   
+       `UPDATE tblinventario i 
       JOIN tblbodegas b ON i.idBodega = b.idBodega 
       SET i.stockReservado = i.stockReservado + ? 
       WHERE i.idProductoColor = ? 
@@ -251,34 +250,49 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
         const nombresRecomendados = response.data.recomendaciones || [];
         if (nombresRecomendados.length > 0) {
           const [productosRecomendados] = await connection.query(
-            `
-            SELECT 
-              p.idProducto, 
-              p.nombre, 
-              pr.precioAlquiler,
-              MIN(pc.idProductoColores) AS idProductoColores,
-              MIN(c.color) AS color,
-              MIN(f.urlFoto) AS imagenProducto,
-              SUM(i.stock) AS stockDisponible,
-              sc.nombre AS nombreSubcategoria,
-              cat.nombre AS nombreCategoria
-            FROM tblproductos p
-            JOIN tblproductoscolores pc ON p.idProducto = pc.idProducto
-            JOIN tblcolores c ON pc.idColor = c.idColores
-            JOIN tblprecio pr ON p.idProducto = pr.idProducto
-            LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
-            LEFT JOIN tblfotosproductos f ON p.idProducto = f.idProducto
-            JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
-            JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
-            WHERE p.nombre IN (?) AND i.stock > 0
-            GROUP BY p.idProducto, p.nombre, pr.precioAlquiler, sc.nombre, cat.nombre
-            LIMIT 5
+            `SELECT 
+    p.idProducto, 
+    p.nombre, 
+    pr.precioAlquiler,
+    colData.idProductoColores,
+    colData.color,
+    f.imagenProducto,
+    colData.stockDisponible,
+    sc.nombre AS nombreSubcategoria,
+    cat.nombre AS nombreCategoria
+FROM tblproductos p
+
+JOIN (
+    SELECT 
+        pc.idProducto,
+        pc.idProductoColores,
+        c.color,
+        SUM(i.stock) AS stockDisponible
+    FROM tblproductoscolores pc
+    JOIN tblcolores c ON pc.idColor = c.idColores
+    LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+    GROUP BY pc.idProducto, pc.idProductoColores, c.color
+) colData ON colData.idProducto = p.idProducto
+
+JOIN tblprecio pr ON p.idProducto = pr.idProducto
+LEFT JOIN (
+    SELECT idProducto, MIN(urlFoto) AS imagenProducto
+    FROM tblfotosproductos
+    GROUP BY idProducto
+) f ON p.idProducto = f.idProducto
+
+JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
+
+WHERE p.nombre = (?)
+  AND colData.stockDisponible > 0
+
+LIMIT 5;
             `,
             [nombresRecomendados]
           );
           recomendaciones = productosRecomendados;
         } else {
-            // Si la API no devuelve recomendaciones, usar el fallback
             recomendaciones = await getFallbackRecommendations(connection);
         }
       }
