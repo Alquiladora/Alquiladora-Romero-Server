@@ -699,29 +699,42 @@ produtosRouter.get("/productosRelacionado/:idSubCategoria", async (req, res) => 
     sc.nombre AS nombreSubcategoria,
     pr.precioAlquiler,
     col.color AS nombreColor,
+
     COALESCE(inv.stock_total, 0) AS stock,
+    inv.estado AS estadoProducto,
+
     GROUP_CONCAT(DISTINCT f.urlFoto SEPARATOR ',') AS imagenes
+
 FROM tblproductos p
 JOIN tblsubcategoria sc 
     ON p.idSubCategoria = sc.idSubCategoria
+
 LEFT JOIN tblprecio pr
     ON p.idProducto = pr.idProducto
+
 LEFT JOIN tblproductoscolores pc 
     ON p.idProducto = pc.idProducto
+
 LEFT JOIN tblcolores col 
     ON pc.idColor = col.idColores
+
 LEFT JOIN (
     SELECT 
         idProductoColor,
-        SUM(stock) AS stock_total
+        SUM(stock) AS stock_total,
+        MAX(estado) AS estado   
     FROM tblinventario
     GROUP BY idProductoColor
-) inv ON inv.idProductoColor = pc.idProductoColores
+) inv 
+    ON inv.idProductoColor = pc.idProductoColores
 
 LEFT JOIN tblfotosproductos f
     ON p.idProducto = f.idProducto
+
 WHERE sc.idSubCategoria = ?
-GROUP BY p.idProducto, col.idColores;   
+
+GROUP BY p.idProducto, col.idColores;
+  
       `;
       const [rows] = await pool.query(sql, [idSubCategoria]);
   
