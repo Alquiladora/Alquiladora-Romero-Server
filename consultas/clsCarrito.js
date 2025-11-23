@@ -244,7 +244,7 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
         const response = await axios.post(
           "https://modelorecomendacion-l6os.onrender.com/recomendar",
           { productos: nombresProductos },
-          { timeout: 7000 }
+          { timeout: 3000 }
         );
 
         const nombresRecomendados = response.data.recomendaciones || [];
@@ -293,6 +293,8 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
           recomendaciones = await getFallbackRecommendations(connection);
         }
       }
+
+      console.log("Resultado de recomendaciones", recomendaciones);
     } catch (error) {
       console.error("Error en API de recomendación, usando fallback:", error.message);
       recomendaciones = await getFallbackRecommendations(connection);
