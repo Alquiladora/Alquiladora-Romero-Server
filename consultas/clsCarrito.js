@@ -67,7 +67,6 @@ JOIN tblcolores c ON pc.idColor = c.idColores
 LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
 WHERE u.idUsuarios = ?
 GROUP BY ca.idCarrito, p.idProducto, pc.idProductoColores, i.idProductoColor;
-
         `,
       [idUsuario]
     );
@@ -109,7 +108,7 @@ GROUP BY ca.idCarrito, p.idProducto, pc.idProductoColores, i.idProductoColor;
       await connection.query(
         `UPDATE tblinventario i 
            JOIN tblbodegas b ON i.idBodega = b.idBodega   
-               i.stockReservado = i.stockReservado - ? 
+            SET i.stockReservado = i.stockReservado - ? 
            WHERE i.idProductoColor = ? 
              AND b.es_principal = 1`,
         [cantidad, idProductoColores]
