@@ -243,14 +243,13 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
         const response = await axios.post(
           "https://modelorecomendacion-l6os.onrender.com/recomendar",
           { productos: nombresProductos },
-          { timeout: 3000 }
+          { timeout: 10000 }
         );
 
         const nombresRecomendados = response.data.recomendaciones || [];
         if (nombresRecomendados.length > 0) {
           const [productosRecomendados] = await connection.query(
-            `
-  SELECT 
+            `SELECT 
     p.idProducto, 
     p.nombre, 
     pr.precioAlquiler,
@@ -260,29 +259,31 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
     colData.stockDisponible,
     sc.nombre AS nombreSubcategoria,
     cat.nombre AS nombreCategoria
-  FROM tblproductos p
-  JOIN (
-      SELECT 
-          pc.idProducto,
-          pc.idProductoColores,
-          c.color,
-          SUM(i.stock) AS stockDisponible
-      FROM tblproductoscolores pc
-      JOIN tblcolores c ON pc.idColor = c.idColores
-      LEFT JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
-      GROUP BY pc.idProducto, pc.idProductoColores, c.color
-  ) colData ON colData.idProducto = p.idProducto
-  JOIN tblprecio pr ON p.idProducto = pr.idProducto
-  LEFT JOIN (
-      SELECT idProducto, MIN(urlFoto) AS imagenProducto
-      FROM tblfotosproductos
-      GROUP BY idProducto
-  ) f ON p.idProducto = f.idProducto
-  JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
-  JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
-  WHERE p.nombre IN (?)
-    AND colData.stockDisponible > 0
-  LIMIT 5;
+FROM tblproductos p
+JOIN tblprecio pr ON p.idProducto = pr.idProducto
+JOIN tblsubcategoria sc ON p.idSubCategoria = sc.idSubCategoria
+JOIN tblcategoria cat ON sc.idCategoria = cat.idcategoria
+JOIN (
+    SELECT 
+        pc.idProducto,
+        pc.idProductoColores,
+        c.color,
+        i.stock AS stockDisponible,
+        ROW_NUMBER() OVER (PARTITION BY pc.idProducto ORDER BY i.stock DESC) AS rn
+    FROM tblproductoscolores pc
+    JOIN tblcolores c ON pc.idColor = c.idColores
+    JOIN tblinventario i ON pc.idProductoColores = i.idProductoColor
+    JOIN tblbodegas b ON i.idBodega = b.idBodega
+    WHERE b.es_principal = 1 AND i.stock > 0
+) colData ON colData.idProducto = p.idProducto
+LEFT JOIN (
+    SELECT idProducto, MIN(urlFoto) AS imagenProducto
+    FROM tblfotosproductos
+    GROUP BY idProducto
+) f ON p.idProducto = f.idProducto
+WHERE p.nombre IN (?)
+  AND colData.rn = 1 
+LIMIT 5;
   `,
             [nombresRecomendados]
           );
