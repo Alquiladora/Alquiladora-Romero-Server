@@ -285,7 +285,7 @@ routerCarrito.post("/agregar", verifyToken, async (req, res) => {
     AND colData.stockDisponible > 0
   LIMIT 5;
   `,
-             [nombresRecomendados]
+            [nombresRecomendados]
           );
           recomendaciones = productosRecomendados;
         } else {
@@ -506,6 +506,9 @@ routerCarrito.delete("/eliminar/:idCarrito", verifyToken, async (req, res) => {
   }
 });
 
+
+
+
 //Acatualizar
 routerCarrito.put("/actualizar/:idCarrito", verifyToken, async (req, res) => {
   const { idCarrito } = req.params;
@@ -555,25 +558,19 @@ routerCarrito.put("/actualizar/:idCarrito", verifyToken, async (req, res) => {
       throw new Error("Producto no encontrado en el inventario");
     }
 
-    const { stock, stockReservado } = inventario[0];
+    const {stock, stockReservado } = inventario[0];
 
     console.log("Datos del inventario:", { stock, stockReservado });
 
-    const stockDisponible = stock - stockReservado;
-
-    console.log("Stok disponible", stockDisponible);
-    console.log("Stok cantidad actual", cantidadActual);
-    console.log("Stok cantidad a", cantidad);
-
-    const diferenciaCantidad = cantidad - cantidadActual;
-    if (diferenciaCantidad > 0 && diferenciaCantidad > stockDisponible) {
+     if (cantidad > stock) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        mensaje: "La cantidad solicitada excede el stock disponible.",
+        mensaje: "La cantidad solicitada excede el stock real disponible.",
       });
     }
 
+   
     await connection.query(
       "UPDATE tblcarrito SET cantidad = ? WHERE idCarrito = ?",
       [cantidad, idCarrito]
@@ -662,6 +659,8 @@ routerCarrito.put("/actualizar/:idCarrito", verifyToken, async (req, res) => {
     }
   }
 });
+
+
 
 const generateNumericTrackingId = () => {
   const timestamp = Date.now().toString();
