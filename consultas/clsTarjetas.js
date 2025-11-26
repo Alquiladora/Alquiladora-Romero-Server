@@ -298,7 +298,7 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const { tempPedidoId, idUsuario } = session.metadata;
+   const { tempPedidoId, idUsuario, puntosUsados } = session.metadata;
     const connection = await pool.getConnection();
     try {
       console.log(`Procesando Pedido Temporal: ${tempPedidoId} para Usuario: ${idUsuario}`);
@@ -332,12 +332,14 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
       console.log('Transacción iniciada.');
       const idRastreo = generateNumericTrackingId();
       const totalPagar = session.amount_total / 100;
+
       const [pedidoResult] = await connection.query(
         `INSERT INTO tblpedidos (idUsuarios, idDireccion, fechaInicio, fechaEntrega, horaAlquiler, totalPagar, estadoActual, tipoPedido, idRastreo) VALUES (?, ?, ?, ?, CURTIME(), ?, ?, 'Online', ?)`,
         [idUsuario, tempOrder.idDireccion, tempOrder.fechaInicio, tempOrder.fechaEntrega, totalPagar, 'Confirmado', idRastreo]
       );
       const nuevoPedidoId = pedidoResult.insertId;
       console.log(`Pedido permanente creado con ID: ${nuevoPedidoId}`);
+
       for (const item of cartItems) {
         const diasAlquiler = (new Date(tempOrder.fechaEntrega) - new Date(tempOrder.fechaInicio)) / (1000 * 60 * 60 * 24);
         const subtotal = item.cantidad * item.precioPorDia * diasAlquiler;
@@ -362,6 +364,24 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
       await connection.query("DELETE FROM tblcarrito WHERE idUsuario = ?", [idUsuario]);
       await connection.query("DELETE FROM tblPedidosTemporales WHERE tempPedidoId = ?", [tempPedidoId]);
       console.log('Limpieza de carrito y pedido temporal completada.');
+
+        const puntosGastados = parseInt(puntosUsados || 0);
+            if (puntosGastados > 0) {
+              console.log(`Registrando canje de ${puntosGastados} puntos para el pedido ${nuevoPedidoId}`);
+              
+              await pool.query(
+                `INSERT INTO tblPuntos 
+                 (idUsuario, tipoMovimiento, puntos, fechaMovimiento, idPedido) 
+                 VALUES (?, ?, ?, NOW(), ?)`,
+                [
+                  idUsuario,           
+                  'Canje por compra',  
+                  -puntosGastados,     
+                  nuevoPedidoId        
+                ]
+              );
+            }
+      
 
 
       await connection.commit();
