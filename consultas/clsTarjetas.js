@@ -284,7 +284,6 @@ const generateNumericTrackingId = () => {
   return "ROMERO-" + timestamp + randomDigits;
 };
 
-// NUEVO WEBHOOK PARA PAGOS COMPLETADOS
 
 router.post('/notificar-pago', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -298,10 +297,14 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-   const { tempPedidoId, idUsuario, puntosUsados } = session.metadata;
+    
+ 
+    const { tempPedidoId, idUsuario, puntosUsados } = session.metadata;
+
     const connection = await pool.getConnection();
     try {
       console.log(`Procesando Pedido Temporal: ${tempPedidoId} para Usuario: ${idUsuario}`);
+      
       const [tempOrders] = await connection.query(
         "SELECT * FROM tblPedidosTemporales WHERE tempPedidoId = ?",
         [tempPedidoId]
@@ -314,93 +317,102 @@ router.post('/notificar-pago', express.raw({ type: 'application/json' }), async 
       const tempOrder = tempOrders[0];
       const cartItems = JSON.parse(tempOrder.cartItems);
 
-
+      // Verificación de Stock
       for (const item of cartItems) {
         const [inventario] = await connection.query(
           "SELECT stock FROM tblinventario WHERE idProductoColor = ?",
           [item.idProductoColor]
         );
         if (inventario.length === 0 || inventario[0].stock < item.cantidad) {
-
-          console.error(`Error de stock para producto ${item.idProductoColor}. Stock disponible: ${inventario[0]?.stock || 0}, solicitado: ${item.cantidad}`);
-
+          console.error(`Error de stock para producto ${item.idProductoColor}.`);
           return res.status(500).json({ error: 'Stock insuficiente.' });
         }
       }
       console.log('Stock verificado exitosamente.');
+
+      // INICIO DE TRANSACCIÓN
       await connection.beginTransaction();
       console.log('Transacción iniciada.');
+
       const idRastreo = generateNumericTrackingId();
       const totalPagar = session.amount_total / 100;
 
+      // Insertar Pedido
       const [pedidoResult] = await connection.query(
         `INSERT INTO tblpedidos (idUsuarios, idDireccion, fechaInicio, fechaEntrega, horaAlquiler, totalPagar, estadoActual, tipoPedido, idRastreo) VALUES (?, ?, ?, ?, CURTIME(), ?, ?, 'Online', ?)`,
         [idUsuario, tempOrder.idDireccion, tempOrder.fechaInicio, tempOrder.fechaEntrega, totalPagar, 'Confirmado', idRastreo]
       );
-      const nuevoPedidoId = pedidoResult.insertId;
+      const nuevoPedidoId = pedidoResult.insertId; // Variable correcta
       console.log(`Pedido permanente creado con ID: ${nuevoPedidoId}`);
 
+      // Insertar Detalles y Actualizar Stock
       for (const item of cartItems) {
         const diasAlquiler = (new Date(tempOrder.fechaEntrega) - new Date(tempOrder.fechaInicio)) / (1000 * 60 * 60 * 24);
         const subtotal = item.cantidad * item.precioPorDia * diasAlquiler;
+        
         await connection.query(
           `INSERT INTO tblpedidodetalles (idPedido, idProductoColores, cantidad, precioUnitario, diasAlquiler, subtotal, estadoProducto) VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [nuevoPedidoId, item.idProductoColor, item.cantidad, item.precioPorDia, diasAlquiler, subtotal, 'Disponible']
         );
+        
         await connection.query(
           "UPDATE tblinventario SET stock = stock - ?, stockReservado = stockReservado - ? WHERE idProductoColor = ?",
           [item.cantidad, item.cantidad, item.idProductoColor]
         );
-
       }
       console.log('Detalles de pedido creados y stock actualizado.');
+
+      // Insertar Pago
       await connection.query(
         `INSERT INTO tblpagos (idPedido, formaPago, metodoPago, monto, estadoPago, detallesPago) VALUES (?, ?, ?, ?, ?, ?)`,
         [nuevoPedidoId, 'Tarjeta', session.payment_method_types[0], totalPagar, 'Completado', session.payment_intent]
       );
       console.log('Registro de pago creado.');
 
-
+     
       await connection.query("DELETE FROM tblcarrito WHERE idUsuario = ?", [idUsuario]);
       await connection.query("DELETE FROM tblPedidosTemporales WHERE tempPedidoId = ?", [tempPedidoId]);
       console.log('Limpieza de carrito y pedido temporal completada.');
 
-        const puntosGastados = parseInt(puntosUsados || 0);
-            if (puntosGastados > 0) {
-              console.log(`Registrando canje de ${puntosGastados} puntos para el pedido ${nuevoPedidoId}`);
-              
-              await pool.query(
-                `INSERT INTO tblPuntos 
-                 (idUsuario, tipoMovimiento, puntos, fechaMovimiento, idPedido) 
-                 VALUES (?, ?, ?, NOW(), ?)`,
-                [
-                  idUsuario,           
-                  'Canje por compra',  
-                  -puntosGastados,     
-                  nuevoPedidoId        
-                ]
-              );
-            }
+   
+      const puntosGastados = parseInt(puntosUsados || 0);
+      if (puntosGastados > 0) {
+        console.log(`Registrando canje de ${puntosGastados} puntos para el pedido ${nuevoPedidoId}`);
+        
       
-
+        await connection.query(
+          `INSERT INTO tblPuntos 
+           (idUsuario, tipoMovimiento, puntos, fechaMovimiento, idPedido) 
+           VALUES (?, ?, ?, NOW(), ?)`,
+          [
+            idUsuario,           
+            'Canje por compra',  
+            -puntosGastados,    
+            nuevoPedidoId        
+          ]
+        );
+      }
 
       await connection.commit();
       console.log(`✅ Transacción completada exitosamente para Pedido ID: ${nuevoPedidoId}.`);
 
     } catch (dbError) {
+        try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.warn("⚠️ El rollback falló porque la conexión ya estaba cerrada:", rollbackError.message);
+      }
 
-      await connection.rollback();
-      console.error(`[DB-WEBHOOK-PAGO] Error en la transacción, se hizo ROLLBACK. Error: ${dbError.message}`);
-
+      console.error(`[DB-WEBHOOK-PAGO] Error Real: ${dbError.message}`);
       return res.status(500).json({ error: 'Error procesando el pedido.' });
-    } finally {
 
-      connection.release();
+    } finally {
+      // Liberar conexión siempre
+      if (connection) connection.release();
     }
   }
   res.json({ received: true });
 });
-
 
 
 
