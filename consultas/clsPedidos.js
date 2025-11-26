@@ -1195,12 +1195,12 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
     const [results] = await pool.query(query);
 
     const response = results.map(pedido => {
-      // Parsear productosAlquilados (ya es un JSON array)
+     
       const productosParsed = pedido.productosAlquilados && pedido.productosAlquilados !== '[]'
         ? JSON.parse(pedido.productosAlquilados)
         : [];
 
-      // Eliminar productos duplicados basados en idPedidoDetalle
+     
       const uniqueProductos = [];
       const seenIds = new Set();
       productosParsed.forEach(producto => {
@@ -1222,12 +1222,12 @@ routerPedidos.get("/pedidos-devueltos", csrfProtection, async (req, res) => {
         }
       });
 
-      // Parsear pagos (ya es un JSON array)
+     
       const pagosParsed = pedido.pagos && pedido.pagos !== '[]'
         ? JSON.parse(pedido.pagos)
         : [];
 
-      // Calcular totalPagado y estadoPago
+    
       const totalPagado = pagosParsed.reduce((sum, pago) => {
         return pago.estadoPago === 'completado' ? sum + parseFloat(pago.monto) : sum;
       }, 0);
@@ -2150,7 +2150,9 @@ routerPedidos.get("/productos/seleccion", csrfProtection, async (req, res) => {
 
 routerPedidos.post('/pagos/crear-checkout-session', async (req, res) => {
   try {
-    const { amount, currency, successUrl, cancelUrl, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems } = req.body;
+    const { amount, currency, successUrl, cancelUrl, idUsuario, idDireccion, fechaInicio, fechaEntrega, cartItems,  puntosUsados, descuentoPuntos } = req.body;
+
+    console.log("Datos recuibidos en pago para puntos", puntosUsados, descuentoPuntos)
     for (const item of cartItems) {
       const [inventario] = await pool.query(
         "SELECT stock FROM tblinventario WHERE idProductoColor = ?",
@@ -2203,6 +2205,8 @@ routerPedidos.post('/pagos/crear-checkout-session', async (req, res) => {
         idDireccion,
         fechaInicio,
         fechaEntrega,
+        puntosUsados: puntosUsados || 0, 
+        descuentoPuntos: descuentoPuntos || 0
       },
       payment_intent_data: {
         transfer_data: {
@@ -2225,18 +2229,18 @@ routerPedidos.get('/pagos/verificar/:sessionId', async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    console.log("Datos de sesion de stripe", session)
+   
 
     if (session.payment_status === 'paid') {
       const { tempPedidoId, idUsuario, idDireccion, fechaInicio, fechaEntrega } = session.metadata;
 
-      // Recuperar los detalles de cartItems desde tblPedidosTemporales
+      
       const [rows] = await pool.query(
         'SELECT cartItems FROM tblPedidosTemporales WHERE tempPedidoId = ?',
         [tempPedidoId]
       );
 
-       console.log("Datos de strpe", rows)
+    
 
       if (rows.length === 0) {
         return res.status(400).json({ success: false, message: 'Pedido temporal no encontrado' });
@@ -2287,8 +2291,27 @@ routerPedidos.get('/pagos/verificar/:sessionId', async (req, res) => {
         );
       }
 
-      // Opcional: Eliminar el pedido temporal después de procesarlo
+      //  Eliminar el pedido temporal
       await pool.query('DELETE FROM tblPedidosTemporales WHERE tempPedidoId = ?', [tempPedidoId]);
+      const puntosGastados = parseInt(puntosUsados || 0);
+      if (puntosGastados > 0) {
+        console.log(`Registrando canje de ${puntosGastados} puntos para el pedido ${idPedido}`);
+        
+        await pool.query(
+          `INSERT INTO tblPuntos 
+           (idUsuario, tipoMovimiento, puntos, fechaMovimiento, idPedido) 
+           VALUES (?, ?, ?, NOW(), ?)`,
+          [
+            idUsuario,           
+            'Canje por compra',  
+            -puntosGastados,     
+            idPedido             
+          ]
+        );
+      }
+
+
+
 
       res.json({ success: true, idPago, idPedido });
     } else {

@@ -558,11 +558,11 @@ routerCarrito.put("/actualizar/:idCarrito", verifyToken, async (req, res) => {
       throw new Error("Producto no encontrado en el inventario");
     }
 
-    const {stock, stockReservado } = inventario[0];
+    const { stock, stockReservado } = inventario[0];
 
     console.log("Datos del inventario:", { stock, stockReservado });
 
-     if (cantidad > stock) {
+    if (cantidad > stock) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -570,7 +570,7 @@ routerCarrito.put("/actualizar/:idCarrito", verifyToken, async (req, res) => {
       });
     }
 
-   
+
     await connection.query(
       "UPDATE tblcarrito SET cantidad = ? WHERE idCarrito = ?",
       [cantidad, idCarrito]
